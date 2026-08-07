@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
-import { TrendingUp, DollarSign, ShoppingCart, Users, CreditCard, Star, Calendar } from 'lucide-react';
+import { TrendingUp, DollarSign, ShoppingCart, Users, CreditCard, Star, Calendar, Receipt } from 'lucide-react';
 import { getAllTransactions, getAllCustomers, getAllInstallmentPlans, getAllProducts } from '../lib/db';
 import { getTodaySummary, getWeekSummary, getMonthSummary, formatCurrency } from '../lib/ledger';
 import { KCBDashboardWidget } from '../components/MpesaDashboardWidget';
+import { TransactionReceiptPopover } from '../components/TransactionReceiptPopover';
 import type { Transaction, Customer, InstallmentPlan, Product } from '../lib/types';
 
 export function DashboardPage() {
@@ -11,6 +12,8 @@ export function DashboardPage() {
   const [installmentPlans, setInstallmentPlans] = useState<InstallmentPlan[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month'>('today');
+  const [hoveredTx, setHoveredTx] = useState<Transaction | null>(null);
+  const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     loadData();
@@ -294,11 +297,17 @@ export function DashboardPage() {
       </div>
 
       {/* Recent Transactions */}
-      <div className="bg-slate-800 rounded-xl p-4">
-        <h3 className="font-medium text-white mb-4 flex items-center gap-2">
-          <ShoppingCart size={18} className="text-emerald-400" />
-          Recent Transactions
-        </h3>
+      <div className="bg-slate-800 rounded-xl p-4 relative">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-medium text-white flex items-center gap-2">
+            <ShoppingCart size={18} className="text-emerald-400" />
+            Recent Transactions
+          </h3>
+          <span className="text-xs text-slate-400 flex items-center gap-1.5 bg-slate-700/50 px-2.5 py-1 rounded-lg border border-slate-700">
+            <Receipt size={14} className="text-emerald-400 animate-pulse" />
+            Hover items to view transaction receipt
+          </span>
+        </div>
         {recentTransactions.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -315,17 +324,36 @@ export function DashboardPage() {
                 {recentTransactions.map((tx) => {
                   const customer = customers.find((c) => c.id === tx.customer_id);
                   return (
-                    <tr key={tx.id} className="hover:bg-slate-700/50">
-                      <td className="py-3 text-sm text-slate-400">
+                    <tr
+                      key={tx.id}
+                      onMouseEnter={(e) => {
+                        setHoveredTx(tx);
+                        setHoverPos({ x: e.clientX, y: e.clientY });
+                      }}
+                      onMouseMove={(e) => {
+                        setHoverPos({ x: e.clientX, y: e.clientY });
+                      }}
+                      onMouseLeave={() => {
+                        setHoveredTx(null);
+                        setHoverPos(null);
+                      }}
+                      className="hover:bg-slate-700/60 transition-colors cursor-pointer group"
+                    >
+                      <td className="py-3 text-sm text-slate-400 group-hover:text-slate-200">
                         {new Date(tx.created_at).toLocaleDateString()}
                       </td>
-                      <td className="py-3 text-white">{customer?.name || 'Walk-in'}</td>
-                      <td className="py-3 text-slate-400">{tx.items?.length || 0} items</td>
-                      <td className="py-3 text-right text-emerald-400 font-medium">
+                      <td className="py-3 text-white font-medium">{customer?.name || 'Walk-in'}</td>
+                      <td className="py-3 text-slate-400">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-700/60 text-slate-300 text-xs group-hover:bg-emerald-500/20 group-hover:text-emerald-300 transition-colors">
+                          <Receipt size={12} className="opacity-70" />
+                          {tx.items?.length || 0} items
+                        </span>
+                      </td>
+                      <td className="py-3 text-right text-emerald-400 font-semibold">
                         KES {tx.total_amount.toLocaleString()}
                       </td>
                       <td className="py-3 text-right">
-                        <span className="px-2 py-1 bg-slate-700 rounded text-xs text-slate-300">
+                        <span className="px-2 py-1 bg-slate-700 rounded text-xs text-slate-300 group-hover:bg-slate-600 transition-colors uppercase">
                           {tx.payment_method}
                         </span>
                       </td>
@@ -337,6 +365,15 @@ export function DashboardPage() {
           </div>
         ) : (
           <p className="text-center text-slate-400 py-8">No transactions for this period</p>
+        )}
+
+        {/* Hover Receipt Pop-over */}
+        {hoveredTx && (
+          <TransactionReceiptPopover
+            transaction={hoveredTx}
+            customer={customers.find((c) => c.id === hoveredTx.customer_id)}
+            position={hoverPos}
+          />
         )}
       </div>
 
