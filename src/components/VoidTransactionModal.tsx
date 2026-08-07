@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, AlertTriangle, Loader2 } from 'lucide-react';
-import { createApprovalRequest } from '../lib/approvals';
+import { requestVoidSale } from '../lib/approvals';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from './Toast';
 import type { Transaction } from '../lib/types';
@@ -93,19 +93,8 @@ export function VoidTransactionModal({ transaction, isOpen, onClose, onVoidCompl
 
     setIsLoading(true);
     try {
-      const result = await createApprovalRequest({
-        requestType: 'SALE_VOID',
-        entityType: 'transaction',
-        entityId: transaction.id,
-        requestData: {
-          transaction_id: transaction.id,
-          amount: transaction.total_amount,
-          payment_method: transaction.payment_method,
-          original_timestamp: transaction.created_at,
-        },
-        reason: reason,
-        userId: user.id,
-      });
+      // Use the helper that creates the void_requests record and then creates the approval request
+      const result = await requestVoidSale(transaction.id, transaction, reason, user.id);
 
       if (result.success) {
         toast.show('Void request submitted for approval', 'success');
