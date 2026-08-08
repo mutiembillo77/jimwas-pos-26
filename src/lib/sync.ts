@@ -15,7 +15,7 @@ export function getSupabase(): SupabaseClient | null {
 let isOnline = navigator.onLine;
 let isSyncing = false;
 
-export type SyncStatus = 'synced' | 'pending' | 'syncing' | 'error' | 'offline';
+export type SyncStatus = 'synced' | 'pending' | 'syncing' | 'error' | 'offline' | 'degraded';
 
 export interface SyncState {
   status: SyncStatus;
@@ -99,6 +99,12 @@ export function getOnlineStatus(): boolean {
 
 async function triggerSync() {
   if (!isOnline || isSyncing) return;
+  if (!getSupabase()) {
+    syncState.status = 'offline';
+    syncState.error = 'Supabase is not configured. Local operations remain enabled.';
+    notifySyncState();
+    return;
+  }
 
   isSyncing = true;
   syncState.status = 'syncing';
@@ -134,8 +140,8 @@ async function triggerSync() {
       syncState.error = remoteError instanceof Error ? remoteError.message : 'Remote sync failed';
     }
 
-    syncState.status = failCount > 0 ? 'error' : 'synced';
-    syncState.lastSync = new Date().toISOString();
+    syncState.status = failCount > 0 || syncState.error ? 'degraded' : 'synced';
+    syncState.lastSync = failCount > 0 || syncState.error ? syncState.lastSync : new Date().toISOString();
     syncState.lastPush = new Date().toISOString();
     syncState.pendingCount = (await getSyncQueue()).length;
     syncState.failedCount = failCount;
@@ -162,7 +168,9 @@ async function processSyncItem(item: { table_name: string; operation: string; da
   let error;
   switch (operation) {
     case 'insert': {
-      const result = await table.insert(data);
+      // All local records carry their stable ID; upsert makes retries safe after
+      // a timeout or a browser restart instead of creating duplicate rows.
+      const result = await table.upsert(data, { onConflict: 'id', ignoreDuplicates: false });
       error = result.error;
       break;
     }

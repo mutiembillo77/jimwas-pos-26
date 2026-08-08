@@ -4,6 +4,7 @@
 import {
   getAllCustomers,
   getAllProducts,
+  getProductBySku,
   getAllTransactions,
   getAllInstallmentPlans,
   getAllInstallmentPayments,
@@ -268,7 +269,11 @@ export async function importBackup(
     if (backup.data.products && Array.isArray(backup.data.products)) {
       for (const product of backup.data.products) {
         try {
-          await saveProduct({ ...product, sync_status: 'synced' } as any);
+          const existingBySku = product.sku ? await getProductBySku(product.sku) : undefined;
+          const productToSave = existingBySku && existingBySku.id !== product.id
+            ? { ...product, id: existingBySku.id, sync_status: 'synced' }
+            : { ...product, sync_status: 'synced' };
+          await saveProduct(productToSave as any);
           result.imported.products++;
         } catch (e) {
           result.errors.push(`Product: ${e}`);
