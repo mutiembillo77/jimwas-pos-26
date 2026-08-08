@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, AlertTriangle, Loader2 } from 'lucide-react';
-import { createApprovalRequest } from '../lib/approvals';
+import { createApprovalRequest, voidTransactionDirect } from '../lib/approvals';
+import { canPerformWithoutApproval } from '../lib/permissions';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from './Toast';
 import type { Transaction } from '../lib/types';
@@ -93,6 +94,17 @@ export function VoidTransactionModal({ transaction, isOpen, onClose, onVoidCompl
 
     setIsLoading(true);
     try {
+      const permission = await canPerformWithoutApproval(user.id, 'SALE_VOID');
+      if (permission.canPerform && !permission.requiresApproval) {
+        const result = await voidTransactionDirect(transaction.id, reason.trim(), user.id);
+        if (result.success) {
+          toast.show('Transaction voided and inventory restored', 'success');
+          setReason('');
+          onClose();
+          onVoidComplete();
+        } else toast.show(result.error || 'Failed to void transaction', 'error');
+        return;
+      }
       const result = await createApprovalRequest({
         requestType: 'SALE_VOID',
         entityType: 'transaction',
@@ -180,7 +192,7 @@ export function VoidTransactionModal({ transaction, isOpen, onClose, onVoidCompl
               <li>Reverse the transaction in the system</li>
               <li>Restore inventory levels</li>
               <li>Refund customer loyalty points if applicable</li>
-              <li>Require manager/admin approval</li>
+              <li>{user.role_code === 'admin' || user.role_code === 'administrator' ? 'Be completed immediately by an authorized admin' : 'Require manager/admin approval'}</li>
               <li>Be logged in the audit trail</li>
             </ul>
           </div>
@@ -218,7 +230,7 @@ export function VoidTransactionModal({ transaction, isOpen, onClose, onVoidCompl
             disabled={isLoading || !reason.trim()}
           >
             {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-            Submit Void Request
+            {user.role_code === 'admin' || user.role_code === 'administrator' ? 'Void Transaction' : 'Submit Void Request'}
           </button>
         </div>
       </div>
