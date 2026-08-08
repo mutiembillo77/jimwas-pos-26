@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { getDB, getSyncQueue, removeFromSyncQueue, addToSyncQueue, generateId } from './db';
+import { getDB, getSyncQueue, removeFromSyncQueue, addToSyncQueue, generateId, getSyncMetadata, setSyncMetadata } from './db';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? import.meta.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -20,16 +20,33 @@ export type SyncStatus = 'synced' | 'pending' | 'syncing' | 'error' | 'offline';
 export interface SyncState {
   status: SyncStatus;
   pendingCount: number;
+  failedCount: number;
+  conflictCount: number;
   lastSync: string | null;
+  lastPush: string | null;
+  lastPull: string | null;
+  deviceId: string | null;
   error: string | null;
 }
 
 let syncState: SyncState = {
-  status: 'synced',
-  pendingCount: 0,
-  lastSync: null,
-  error: null,
+  status: 'synced', pendingCount: 0, failedCount: 0, conflictCount: 0,
+  lastSync: null, lastPush: null, lastPull: null, deviceId: null, error: null,
 };
+
+let deviceIdPromise: Promise<string> | null = null;
+async function getDeviceId(): Promise<string> {
+  if (!deviceIdPromise) deviceIdPromise = (async () => {
+    const existing = await getSyncMetadata('device_id');
+    if (existing) return existing;
+    const created = globalThis.crypto?.randomUUID?.() ?? generateId();
+    await setSyncMetadata('device_id', created);
+    return created;
+  })();
+  const id = await deviceIdPromise;
+  syncState.deviceId = id;
+  return id;
+}
 
 const syncListeners: Set<(state: SyncState) => void> = new Set();
 
@@ -60,6 +77,9 @@ export function initNetworkListeners() {
     notifySyncState();
   });
 
+  void getDeviceId().then(() => {
+    notifySyncState();
+  });
   checkPendingCount();
 }
 
@@ -91,21 +111,19 @@ async function triggerSync() {
     let successCount = 0;
     let failCount = 0;
 
+    const now = Date.now();
     for (const item of queue) {
+      if (item.next_retry_at && new Date(item.next_retry_at).getTime() > now) continue;
       try {
         await processSyncItem(item);
         await removeFromSyncQueue(item.id);
         successCount++;
       } catch (error) {
         console.error('Sync failed for item:', item.id, item.table_name, item.operation, error);
-        // Remove items older than 24h that keep failing — they're likely stale
-        const age = Date.now() - new Date(item.created_at).getTime();
-        if (age > 24 * 60 * 60 * 1000) {
-          await removeFromSyncQueue(item.id);
-          successCount++; // count as resolved to clear pendingCount
-        } else {
-          failCount++;
-        }
+        const retryCount = (item.retry_count ?? 0) + 1;
+        const retryDelay = Math.min(60 * 60 * 1000, 1000 * 2 ** Math.min(retryCount, 10));
+        await addToSyncQueue({ ...item, retry_count: retryCount, next_retry_at: new Date(Date.now() + retryDelay).toISOString(), last_error: error instanceof Error ? error.message : 'Sync failed' });
+        failCount++;
       }
     }
 
@@ -116,9 +134,11 @@ async function triggerSync() {
       syncState.error = remoteError instanceof Error ? remoteError.message : 'Remote sync failed';
     }
 
-    syncState.status = 'synced';
+    syncState.status = failCount > 0 ? 'error' : 'synced';
     syncState.lastSync = new Date().toISOString();
-    syncState.pendingCount = queue.length - successCount;
+    syncState.lastPush = new Date().toISOString();
+    syncState.pendingCount = (await getSyncQueue()).length;
+    syncState.failedCount = failCount;
 
     if (failCount > 0 && !syncState.error) {
       syncState.error = `${failCount} items failed to sync`;
@@ -234,7 +254,11 @@ async function syncTableFromRemote(client: SupabaseClient, db: Awaited<ReturnTyp
       if (fieldValue) {
         const existing = await db.getFromIndex(config.store, config.uniqueIndex, fieldValue);
         if (existing && existing.id !== row.id) {
-          await db.delete(config.store, existing.id);
+          const pending = await getSyncQueue();
+          const hasPendingWrite = pending.some(item => item.table_name === config.table && item.data.id === existing.id);
+          if (hasPendingWrite) continue;
+          // Reuse the existing local key to avoid unique-index collisions.
+          row.id = existing.id;
         }
       }
     }
@@ -259,6 +283,7 @@ async function syncFromRemote() {
       console.error(`Failed to sync ${config.table}:`, error);
     }
   }
+  syncState.lastPull = new Date().toISOString();
 }
 
 export async function syncNow(): Promise<{ success: boolean; message: string }> {
@@ -279,21 +304,20 @@ export async function syncNow(): Promise<{ success: boolean; message: string }> 
 }
 
 export function queueForSync(tableName: string, operation: 'insert' | 'update' | 'delete', data: unknown) {
-  addToSyncQueue({
-    id: generateId(),
-    table_name: tableName,
-    operation,
-    data: data as Record<string, unknown>,
-    created_at: new Date().toISOString(),
-  });
-
-  syncState.pendingCount++;
-  syncState.status = 'pending';
-  notifySyncState();
-
-  if (isOnline) {
-    triggerSync();
-  }
+  const record = data as Record<string, unknown>;
+  void (async () => {
+    const queue = await getSyncQueue();
+    const existing = queue.find(item => item.table_name === tableName && item.operation !== 'delete' && item.data.id === record.id);
+    if (existing) {
+      await addToSyncQueue({ ...existing, operation, data: record, retry_count: 0, next_retry_at: undefined, last_error: undefined });
+    } else {
+      await addToSyncQueue({ id: generateId(), table_name: tableName, operation, data: record, created_at: new Date().toISOString(), device_id: await getDeviceId() });
+    }
+    syncState.pendingCount = (await getSyncQueue()).length;
+    syncState.status = 'pending';
+    notifySyncState();
+    if (isOnline) void triggerSync();
+  })();
 }
 
 // Generic sync helpers

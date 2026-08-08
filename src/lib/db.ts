@@ -225,7 +225,15 @@ interface POSDatabase extends DBSchema {
       operation: 'insert' | 'update' | 'delete';
       data: Record<string, unknown>;
       created_at: string;
+      retry_count?: number;
+      next_retry_at?: string;
+      last_error?: string;
+      device_id?: string;
     };
+  };
+  sync_metadata: {
+    key: string;
+    value: { key: string; value: string };
   };
   shifts: { key: string; value: ShiftRecord; indexes: { 'by-status': string; 'by-cashier': string } };
   reconciliations: { key: string; value: ReconciliationRecord; indexes: { 'by-status': string; 'by-method': string } };
@@ -419,7 +427,7 @@ export interface TransactionItem {
 }
 
 const DB_NAME = 'pos-offline-db';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 let dbInstance: IDBPDatabase<POSDatabase> | null = null;
 
@@ -501,10 +509,14 @@ export async function getDB(): Promise<IDBPDatabase<POSDatabase>> {
         adjustmentStore.createIndex('by-product', 'product_id');
       }
 
-      // Sync queue store
-      if (!db.objectStoreNames.contains('sync_queue')) {
-        db.createObjectStore('sync_queue', { keyPath: 'id' });
-      }
+  // Sync queue store
+  if (!db.objectStoreNames.contains('sync_queue')) {
+    db.createObjectStore('sync_queue', { keyPath: 'id' });
+  }
+  if (!db.objectStoreNames.contains('sync_metadata')) {
+    db.createObjectStore('sync_metadata', { keyPath: 'key' });
+  }
+
 
       if (!db.objectStoreNames.contains('shifts')) {
         const store = db.createObjectStore('shifts', { keyPath: 'id' });
@@ -914,6 +926,16 @@ export async function removeFromSyncQueue(id: string) {
 export async function clearSyncQueue() {
   const db = await getDB();
   await db.clear('sync_queue');
+}
+
+export async function getSyncMetadata(key: string): Promise<string | undefined> {
+  const db = await getDB();
+  return (await db.get('sync_metadata', key))?.value;
+}
+
+export async function setSyncMetadata(key: string, value: string): Promise<void> {
+  const db = await getDB();
+  await db.put('sync_metadata', { key, value });
 }
 
 // ============ SECURITY STORE OPERATIONS ============
