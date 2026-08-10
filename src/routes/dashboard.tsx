@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { TrendingUp, DollarSign, ShoppingCart, Users, CreditCard, Star, Calendar, FileText, Printer, Download } from 'lucide-react';
+import { TrendingUp, DollarSign, ShoppingCart, Users, CreditCard, Star, Calendar, FileText, Printer, Download, Search, RefreshCw } from 'lucide-react';
 import { getAllTransactions, getAllCustomers, getAllInstallmentPlans, getAllProducts } from '../lib/db';
 import { getTodaySummary, getWeekSummary, getMonthSummary, formatCurrency } from '../lib/ledger';
 import { KCBDashboardWidget } from '../components/MpesaDashboardWidget';
@@ -11,12 +11,16 @@ export function DashboardPage() {
   const [installmentPlans, setInstallmentPlans] = useState<InstallmentPlan[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month'>('today');
+  const [searchDate, setSearchDate] = useState('');
+  const [searchDay, setSearchDay] = useState('all');
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     loadData();
   }, []);
 
   const loadData = async () => {
+    setIsLoading(true);
     const [txData, custData, planData, prodData] = await Promise.all([
       getAllTransactions(),
       getAllCustomers(),
@@ -27,6 +31,7 @@ export function DashboardPage() {
     setCustomers(custData);
     setInstallmentPlans(planData);
     setProducts(prodData);
+    setIsLoading(false);
   };
 
   const dateRange = useMemo(() => {
@@ -53,7 +58,10 @@ export function DashboardPage() {
     return transactions.filter((tx) => {
       if (tx.status === 'voided') return false;
       const txDate = new Date(tx.created_at);
-      return txDate >= dateRange.start && txDate <= dateRange.end;
+      const localDate = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}-${String(txDate.getDate()).padStart(2, '0')}`;
+      const dayMatches = searchDay === 'all' || txDate.getDay() === Number(searchDay);
+      const dateMatches = !searchDate || localDate === searchDate;
+      return txDate >= dateRange.start && txDate <= dateRange.end && dayMatches && dateMatches;
     });
   }, [transactions, dateRange]);
 
@@ -115,7 +123,8 @@ export function DashboardPage() {
     }
 
     filteredTransactions.forEach((tx) => {
-      const dateStr = new Date(tx.created_at).toISOString().split('T')[0];
+      const txDate = new Date(tx.created_at);
+      const dateStr = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}-${String(txDate.getDate()).padStart(2, '0')}`;
       if (dayStats[dateStr]) {
         dayStats[dateStr].revenue += tx.amount_paid;
         dayStats[dateStr].count += 1;
@@ -136,7 +145,7 @@ export function DashboardPage() {
 
   const openDetailedReport = (print = false) => {
     const generatedAt = new Date();
-    const rows = recentTransactions.flatMap((tx) => (tx.items ?? []).map((item) => {
+    const rows = filteredTransactions.flatMap((tx) => (tx.items ?? []).map((item) => {
       const product = stockByProduct.get(item.product_id);
       const stock = product?.stock ?? 0;
       const stockClass = stock <= 0 ? 'out' : stock <= (product?.low_stock_alert || 5) ? 'low' : 'ok';
@@ -144,11 +153,13 @@ export function DashboardPage() {
       return `<tr><td>${new Date(tx.created_at).toLocaleDateString()}<br><small>${new Date(tx.created_at).toLocaleTimeString()}</small></td><td>${customer}</td><td><strong>${item.product_name}</strong><br><small>${item.quantity} × KES ${item.unit_price.toLocaleString()}</small></td><td>${item.quantity}</td><td class="${stockClass}">${stock <= 0 ? 'Out of stock' : `${stock} in stock`}</td><td>KES ${item.subtotal.toLocaleString()}</td><td>${tx.payment_method}</td></tr>`;
     })).join('');
     const html = `<!doctype html><html><head><title>Jimwas POS Detailed Report</title><style>body{font:13px Arial,sans-serif;color:#172033;margin:28px}h1{margin:0 0 4px}p{color:#64748b}.actions{margin:18px 0}button{padding:10px 16px;border:0;border-radius:6px;background:#059669;color:white;font-weight:700}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #dbe3ee;padding:8px;text-align:left;vertical-align:top}th{background:#eaf1f7}small{color:#64748b}.ok{color:#047857;background:#ecfdf5;font-weight:700}.low{color:#b45309;background:#fffbeb;font-weight:700}.out{color:#b91c1c;background:#fef2f2;font-weight:700}@media print{.actions{display:none}@page{margin:12mm}}</style></head><body><h1>Jimwas POS — Detailed Sales Report</h1><p>Period: ${timeRange === 'today' ? 'Today' : timeRange === 'week' ? 'This Week' : 'This Month'} | Generated: ${generatedAt.toLocaleString()}</p><div class="actions"><button onclick="window.print()">Print / Save as PDF</button></div><table><thead><tr><th>Date & time</th><th>Customer</th><th>Full item description</th><th>Qty</th><th>Current stock</th><th>Amount</th><th>Payment</th></tr></thead><tbody>${rows || '<tr><td colspan="7">No transactions for this period</td></tr>'}</tbody></table><p>Paybill No. 522522 | A/C No. 7941675</p><p><strong>Thank You For Shopping With Us</strong></p></body></html>`;
-    const reportWindow = window.open('', '_blank', 'noopener,noreferrer');
+    const reportWindow = window.open('', '_blank');
     if (!reportWindow) return;
+    reportWindow.document.open();
     reportWindow.document.write(html);
     reportWindow.document.close();
-    if (print) reportWindow.onload = () => reportWindow.print();
+    reportWindow.focus();
+    if (print) window.setTimeout(() => reportWindow.print(), 500);
   };
 
   const lowStockProducts = products.filter(
@@ -158,27 +169,22 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* Time Range Selector */}
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2 bg-slate-800 rounded-lg p-1">
-          {(['today', 'week', 'month'] as const).map((range) => (
-            <button
-              key={range}
-              onClick={() => setTimeRange(range)}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition ${
-                timeRange === range
-                  ? 'bg-emerald-600 text-white'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              {range === 'today' ? 'Today' : range === 'week' ? 'This Week' : 'This Month'}
-            </button>
-          ))}
+      {/* Dashboard Controls */}
+      <div className="flex flex-col gap-3 rounded-xl bg-slate-800 p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-2 bg-slate-700/70 rounded-lg p-1">
+          {(['today', 'week', 'month'] as const).map((range) => <button key={range} onClick={() => setTimeRange(range)} className={`px-4 py-2 rounded-md text-sm font-medium transition ${timeRange === range ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>{range === 'today' ? 'Today' : range === 'week' ? 'This Week' : 'This Month'}</button>)}
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <label className="flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm text-slate-300"><Search size={16} /><span className="sr-only">Search by date</span><input type="date" value={searchDate} onChange={(event) => setSearchDate(event.target.value)} className="bg-transparent text-white outline-none" /></label>
+          <label className="rounded-lg bg-slate-700 px-3 py-2 text-sm text-slate-300"><span className="sr-only">Search by day</span><select value={searchDay} onChange={(event) => setSearchDay(event.target.value)} className="bg-transparent text-white outline-none"><option value="all">All days</option><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option></select></label>
+          {(searchDate || searchDay !== 'all') && <button onClick={() => { setSearchDate(''); setSearchDay('all'); }} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-slate-700"><RefreshCw size={15} /> Clear</button>}
         </div>
       </div>
-
+      <div className="flex items-center gap-4">
+        <p className="text-sm text-slate-400">Showing <span className="font-semibold text-white">{filteredTransactions.length}</span> transactions for the selected period</p>
+      </div>
       {/* Main Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="bg-slate-800 rounded-xl p-4">
           <div className="flex items-center justify-between mb-2">
             <div className="w-10 h-10 bg-emerald-600/20 rounded-lg flex items-center justify-center">
@@ -222,7 +228,7 @@ export function DashboardPage() {
       </div>
 
       {/* Secondary Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="bg-slate-800 rounded-xl p-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-amber-600/20 rounded-lg flex items-center justify-center">
@@ -264,30 +270,16 @@ export function DashboardPage() {
         <KCBDashboardWidget timeRange={timeRange} />
 
       {/* Charts and Tables */}
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         {/* Sales Chart */}
         <div className="bg-slate-800 rounded-xl p-4">
           <h3 className="font-medium text-white mb-4 flex items-center gap-2">
             <TrendingUp size={18} className="text-emerald-400" />
             Sales Overview
           </h3>
-          <div className="h-64 flex items-end gap-2">
-            {salesByDay.map((day, i) => {
-              const height = (day.revenue / maxRevenue) * 100;
-              return (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                  <div
-                    className="w-full bg-emerald-600 rounded-t transition-all hover:bg-emerald-500"
-                    style={{ height: `${Math.max(height, 4)}%` }}
-                    title={`KES ${day.revenue.toLocaleString()}`}
-                  />
-                  <span className="text-xs text-slate-400 transform -rotate-45 origin-center">
-                    {new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' })}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+          {isLoading ? <p className="h-64 flex items-center justify-center text-slate-400">Loading sales data...</p> : salesByDay.length === 0 || salesByDay.every((day) => day.revenue === 0) ? <div className="h-64 flex flex-col items-center justify-center gap-2 text-slate-400"><TrendingUp size={28} className="text-slate-600" /><p>No sales recorded for this period</p><p className="text-xs">Try another date or day filter.</p></div> : <div className="h-64 flex items-end gap-2 border-b border-slate-700 pb-1">
+            {salesByDay.map((day, i) => { const height = (day.revenue / maxRevenue) * 100; const date = new Date(`${day.date}T12:00:00`); return <div key={i} className="group flex h-full flex-1 flex-col items-center justify-end gap-1"><div className="relative flex w-full flex-1 items-end"><div className="w-full rounded-t bg-emerald-600 transition-all group-hover:bg-emerald-400" style={{ height: `${Math.max(height, 3)}%` }} title={`KES ${day.revenue.toLocaleString()}`} /><span className="absolute bottom-full left-1/2 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded bg-slate-950 px-2 py-1 text-xs text-white group-hover:block">KES {day.revenue.toLocaleString()}</span></div><span className="text-xs text-slate-400">{date.toLocaleDateString('en-US', { weekday: 'short' })}</span></div>; })}
+          </div>}
         </div>
 
         {/* Top Products */}
@@ -322,7 +314,7 @@ export function DashboardPage() {
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
           <div className="flex items-center gap-2"><FileText size={18} className="text-emerald-400" /><div><h3 className="font-medium text-white">Detailed Sales Report</h3><p className="text-xs text-slate-400">Full item descriptions and exact stock as of report generation</p></div></div>
           <div className="flex items-center gap-2">
-            <button onClick={() => openDetailedReport(false)} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500"><Download size={16} /> Generate PDF Report</button>
+            <button onClick={() => openDetailedReport(true)} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500"><Download size={16} /> Generate PDF Report</button>
             <button onClick={() => openDetailedReport(true)} className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600"><Printer size={16} /> Print Report</button>
           </div>
         </div>
