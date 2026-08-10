@@ -12,7 +12,7 @@ export function getSupabase(): SupabaseClient | null {
   return _supabase;
 }
 
-let isOnline = navigator.onLine;
+let isOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
 let isSyncing = false;
 
 export type SyncStatus = 'synced' | 'pending' | 'syncing' | 'error' | 'offline' | 'degraded';
@@ -64,6 +64,7 @@ export function getSyncState(): SyncState {
 }
 
 export function initNetworkListeners() {
+  if (typeof window === 'undefined') return;
   window.addEventListener('online', () => {
     isOnline = true;
     syncState.status = 'synced';
@@ -221,6 +222,7 @@ const TABLE_CONFIGS: TableSyncConfig[] = [
   { table: 'kcb_settings', store: 'kcb_settings', single: true },
   { table: 'kcb_payments', store: 'kcb_payments', orderBy: 'created_at', limit: 500 },
   { table: 'payment_methods', store: 'payment_methods' },
+  { table: 'payment_accounts', store: 'payment_accounts', uniqueIndex: 'by-code', uniqueField: 'code' },
   { table: 'loyalty_settings', store: 'loyalty_settings', single: true },
   { table: 'receipt_settings', store: 'receipt_settings', single: true },
   { table: 'ledger_entries', store: 'ledger_entries', orderBy: 'date', limit: 1000 },

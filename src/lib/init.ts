@@ -5,6 +5,7 @@ import {
   DEFAULT_PAYMENT_METHODS,
   DEFAULT_LOYALTY_SETTINGS,
   DEFAULT_RECEIPT_SETTINGS,
+  DEFAULT_PAYMENT_ACCOUNTS,
 } from './settings-types';
 
 /**
@@ -19,6 +20,12 @@ export async function initializeApp(): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, 100));
 
     try {
+      // Payment accounts must be seeded independently from first-run settings so
+      // upgrades and existing installations receive the destinations too.
+      for (const account of DEFAULT_PAYMENT_ACCOUNTS) {
+        if (!(await db.get('payment_accounts', account.id))) await db.put('payment_accounts', account);
+      }
+
       // Check if business settings exist
       const existingSettings = await db.get('business_settings', DEFAULT_BUSINESS_SETTINGS.id);
       if (!existingSettings) {

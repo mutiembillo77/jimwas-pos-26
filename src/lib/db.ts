@@ -16,6 +16,7 @@ import type {
   BusinessSettings,
   KCBSettings,
   PaymentMethodConfig,
+  PaymentAccount,
   LoyaltySettings,
   ReceiptSettings,
 } from './settings-types';
@@ -77,6 +78,8 @@ interface POSDatabase extends DBSchema {
       amount_paid: number;
       change_amount: number;
       payment_method: string;
+      payment_account_id?: string | null;
+      payment_account_name?: string | null;
       status: string;
       notes?: string;
       created_at: string;
@@ -333,6 +336,11 @@ interface POSDatabase extends DBSchema {
     key: string;
     value: PaymentMethodConfig;
   };
+  payment_accounts: {
+    key: string;
+    value: PaymentAccount;
+    indexes: { 'by-code': string; 'by-category': string; 'by-status': string };
+  };
   loyalty_settings: {
     key: string;
     value: LoyaltySettings;
@@ -427,7 +435,7 @@ export interface TransactionItem {
 }
 
 const DB_NAME = 'pos-offline-db';
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 
 let dbInstance: IDBPDatabase<POSDatabase> | null = null;
 
@@ -652,9 +660,15 @@ export async function getDB(): Promise<IDBPDatabase<POSDatabase>> {
         kcbPaymentStore.createIndex('by-created-at', 'created_at');
       }
 
-      if (!db.objectStoreNames.contains('payment_methods')) {
-        db.createObjectStore('payment_methods', { keyPath: 'id' });
-      }
+  if (!db.objectStoreNames.contains('payment_methods')) {
+    db.createObjectStore('payment_methods', { keyPath: 'id' });
+  }
+  if (!db.objectStoreNames.contains('payment_accounts')) {
+    const accounts = db.createObjectStore('payment_accounts', { keyPath: 'id' });
+    accounts.createIndex('by-code', 'code', { unique: true });
+    accounts.createIndex('by-category', 'business_category');
+    accounts.createIndex('by-status', 'status');
+  }
 
       if (!db.objectStoreNames.contains('loyalty_settings')) {
         db.createObjectStore('loyalty_settings', { keyPath: 'id' });
@@ -1446,6 +1460,20 @@ export async function getKCBStatistics(sinceDate?: Date): Promise<KCBStatistics>
     successRate,
     recentTransactions,
   };
+}
+
+// Payment account operations
+export async function savePaymentAccount(account: PaymentAccount): Promise<PaymentAccount> {
+  const db = await getDB();
+  await db.put('payment_accounts', account);
+  const { queueForSync } = await import('./sync');
+  queueForSync('payment_accounts', 'update', account as unknown as Record<string, unknown>);
+  return account;
+}
+
+export async function getAllPaymentAccounts(): Promise<PaymentAccount[]> {
+  const db = await getDB();
+  return db.getAll('payment_accounts');
 }
 
 // Payment method operations

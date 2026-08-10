@@ -17,6 +17,8 @@ export interface CompleteSaleParams {
   change: number;
   userId: string;
   mpesaReceipt?: string;
+  paymentAccountId?: string | null;
+  paymentAccountName?: string | null;
   saleType?: SaleType;
   depositAmount?: number;
   balanceAmount?: number;
@@ -38,6 +40,8 @@ export async function completeSale({
   change,
   userId,
   mpesaReceipt,
+  paymentAccountId = null,
+  paymentAccountName = null,
   saleType = 'standard',
   depositAmount = 0,
   balanceAmount = 0,
@@ -68,6 +72,8 @@ export async function completeSale({
     amount_paid: amountPaid,
     change_amount: change,
     payment_method: method,
+    payment_account_id: paymentAccountId,
+    payment_account_name: paymentAccountName,
     status: 'completed' as const,
     created_at: now,
     sync_status: 'pending' as const,

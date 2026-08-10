@@ -46,6 +46,8 @@ export interface Transaction {
   amount_paid: number;
   change_amount: number;
   payment_method: string;
+  payment_account_id?: string | null;
+  payment_account_name?: string | null;
   status: string;
   notes?: string;
   created_at: string;
