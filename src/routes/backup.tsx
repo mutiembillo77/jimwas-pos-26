@@ -251,6 +251,12 @@ export function BackupPage() {
             )}
           </button>
         </div>
+        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div className="bg-slate-700 rounded-lg p-3"><p className="text-slate-400">Pending</p><p className="text-white font-semibold">{syncState.pendingCount}</p></div>
+          <div className="bg-slate-700 rounded-lg p-3"><p className="text-slate-400">Failed</p><p className="text-amber-400 font-semibold">{syncState.failedCount}</p></div>
+          <div className="bg-slate-700 rounded-lg p-3"><p className="text-slate-400">Conflicts</p><p className="text-red-400 font-semibold">{syncState.conflictCount}</p></div>
+          <div className="bg-slate-700 rounded-lg p-3"><p className="text-slate-400">Device</p><p className="text-white font-mono truncate" title={syncState.deviceId ?? 'Not initialized'}>{syncState.deviceId ? syncState.deviceId.slice(0, 8) : 'Initializing'}</p></div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

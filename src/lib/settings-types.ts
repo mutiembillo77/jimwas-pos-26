@@ -37,6 +37,30 @@ export interface KCBSettings {
   sync_status: 'pending' | 'synced';
 }
 
+export type BusinessCategory = 'FURNITURE' | 'HOUSEHOLD' | 'ANY';
+
+export interface PaymentAccount {
+  id: string;
+  code: string;
+  name: string;
+  institution: string;
+  account_type: 'BANK' | 'MOBILE_MONEY' | 'CARD' | 'CASH';
+  account_number_masked?: string;
+  business_category: BusinessCategory;
+  currency: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+  sync_status: 'pending' | 'synced';
+  device_id?: string;
+}
+
+export const DEFAULT_PAYMENT_ACCOUNTS: PaymentAccount[] = [
+  { id: 'payment-account-furniture-ncba', code: 'FURNITURE-NCBA', name: 'Furniture-NCBA', institution: 'NCBA', account_type: 'BANK', business_category: 'FURNITURE', currency: 'KES', status: 'ACTIVE', is_default: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), sync_status: 'pending' },
+  { id: 'payment-account-household-kcb', code: 'HOUSEHOLD-KCB', name: 'Household-KCB', institution: 'KCB', account_type: 'BANK', business_category: 'HOUSEHOLD', currency: 'KES', status: 'ACTIVE', is_default: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), sync_status: 'pending' },
+];
+
 export interface PaymentMethodConfig {
   id: string;
   method_name: 'cash' | 'card' | 'kcb' | 'bank_transfer';

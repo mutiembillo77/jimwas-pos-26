@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { getDB, getSyncQueue, removeFromSyncQueue, addToSyncQueue, generateId } from './db';
+import { getDB, getSyncQueue, removeFromSyncQueue, addToSyncQueue, generateId, getSyncMetadata, setSyncMetadata } from './db';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? import.meta.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -12,24 +12,41 @@ export function getSupabase(): SupabaseClient | null {
   return _supabase;
 }
 
-let isOnline = navigator.onLine;
+let isOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
 let isSyncing = false;
 
-export type SyncStatus = 'synced' | 'pending' | 'syncing' | 'error' | 'offline';
+export type SyncStatus = 'synced' | 'pending' | 'syncing' | 'error' | 'offline' | 'degraded';
 
 export interface SyncState {
   status: SyncStatus;
   pendingCount: number;
+  failedCount: number;
+  conflictCount: number;
   lastSync: string | null;
+  lastPush: string | null;
+  lastPull: string | null;
+  deviceId: string | null;
   error: string | null;
 }
 
 let syncState: SyncState = {
-  status: 'synced',
-  pendingCount: 0,
-  lastSync: null,
-  error: null,
+  status: 'synced', pendingCount: 0, failedCount: 0, conflictCount: 0,
+  lastSync: null, lastPush: null, lastPull: null, deviceId: null, error: null,
 };
+
+let deviceIdPromise: Promise<string> | null = null;
+async function getDeviceId(): Promise<string> {
+  if (!deviceIdPromise) deviceIdPromise = (async () => {
+    const existing = await getSyncMetadata('device_id');
+    if (existing) return existing;
+    const created = globalThis.crypto?.randomUUID?.() ?? generateId();
+    await setSyncMetadata('device_id', created);
+    return created;
+  })();
+  const id = await deviceIdPromise;
+  syncState.deviceId = id;
+  return id;
+}
 
 const syncListeners: Set<(state: SyncState) => void> = new Set();
 
@@ -47,6 +64,7 @@ export function getSyncState(): SyncState {
 }
 
 export function initNetworkListeners() {
+  if (typeof window === 'undefined') return;
   window.addEventListener('online', () => {
     isOnline = true;
     syncState.status = 'synced';
@@ -60,6 +78,9 @@ export function initNetworkListeners() {
     notifySyncState();
   });
 
+  void getDeviceId().then(() => {
+    notifySyncState();
+  });
   checkPendingCount();
 }
 
@@ -79,6 +100,12 @@ export function getOnlineStatus(): boolean {
 
 async function triggerSync() {
   if (!isOnline || isSyncing) return;
+  if (!getSupabase()) {
+    syncState.status = 'offline';
+    syncState.error = 'Supabase is not configured. Local operations remain enabled.';
+    notifySyncState();
+    return;
+  }
 
   isSyncing = true;
   syncState.status = 'syncing';
@@ -91,21 +118,19 @@ async function triggerSync() {
     let successCount = 0;
     let failCount = 0;
 
+    const now = Date.now();
     for (const item of queue) {
+      if (item.next_retry_at && new Date(item.next_retry_at).getTime() > now) continue;
       try {
         await processSyncItem(item);
         await removeFromSyncQueue(item.id);
         successCount++;
       } catch (error) {
         console.error('Sync failed for item:', item.id, item.table_name, item.operation, error);
-        // Remove items older than 24h that keep failing — they're likely stale
-        const age = Date.now() - new Date(item.created_at).getTime();
-        if (age > 24 * 60 * 60 * 1000) {
-          await removeFromSyncQueue(item.id);
-          successCount++; // count as resolved to clear pendingCount
-        } else {
-          failCount++;
-        }
+        const retryCount = (item.retry_count ?? 0) + 1;
+        const retryDelay = Math.min(60 * 60 * 1000, 1000 * 2 ** Math.min(retryCount, 10));
+        await addToSyncQueue({ ...item, retry_count: retryCount, next_retry_at: new Date(Date.now() + retryDelay).toISOString(), last_error: error instanceof Error ? error.message : 'Sync failed' });
+        failCount++;
       }
     }
 
@@ -116,9 +141,11 @@ async function triggerSync() {
       syncState.error = remoteError instanceof Error ? remoteError.message : 'Remote sync failed';
     }
 
-    syncState.status = 'synced';
-    syncState.lastSync = new Date().toISOString();
-    syncState.pendingCount = queue.length - successCount;
+    syncState.status = failCount > 0 || syncState.error ? 'degraded' : 'synced';
+    syncState.lastSync = failCount > 0 || syncState.error ? syncState.lastSync : new Date().toISOString();
+    syncState.lastPush = new Date().toISOString();
+    syncState.pendingCount = (await getSyncQueue()).length;
+    syncState.failedCount = failCount;
 
     if (failCount > 0 && !syncState.error) {
       syncState.error = `${failCount} items failed to sync`;
@@ -142,7 +169,9 @@ async function processSyncItem(item: { table_name: string; operation: string; da
   let error;
   switch (operation) {
     case 'insert': {
-      const result = await table.insert(data);
+      // All local records carry their stable ID; upsert makes retries safe after
+      // a timeout or a browser restart instead of creating duplicate rows.
+      const result = await table.upsert(data, { onConflict: 'id', ignoreDuplicates: false });
       error = result.error;
       break;
     }
@@ -193,6 +222,7 @@ const TABLE_CONFIGS: TableSyncConfig[] = [
   { table: 'kcb_settings', store: 'kcb_settings', single: true },
   { table: 'kcb_payments', store: 'kcb_payments', orderBy: 'created_at', limit: 500 },
   { table: 'payment_methods', store: 'payment_methods' },
+  { table: 'payment_accounts', store: 'payment_accounts', uniqueIndex: 'by-code', uniqueField: 'code' },
   { table: 'loyalty_settings', store: 'loyalty_settings', single: true },
   { table: 'receipt_settings', store: 'receipt_settings', single: true },
   { table: 'ledger_entries', store: 'ledger_entries', orderBy: 'date', limit: 1000 },
@@ -234,7 +264,11 @@ async function syncTableFromRemote(client: SupabaseClient, db: Awaited<ReturnTyp
       if (fieldValue) {
         const existing = await db.getFromIndex(config.store, config.uniqueIndex, fieldValue);
         if (existing && existing.id !== row.id) {
-          await db.delete(config.store, existing.id);
+          const pending = await getSyncQueue();
+          const hasPendingWrite = pending.some(item => item.table_name === config.table && item.data.id === existing.id);
+          if (hasPendingWrite) continue;
+          // Reuse the existing local key to avoid unique-index collisions.
+          row.id = existing.id;
         }
       }
     }
@@ -259,6 +293,7 @@ async function syncFromRemote() {
       console.error(`Failed to sync ${config.table}:`, error);
     }
   }
+  syncState.lastPull = new Date().toISOString();
 }
 
 export async function syncNow(): Promise<{ success: boolean; message: string }> {
@@ -279,21 +314,20 @@ export async function syncNow(): Promise<{ success: boolean; message: string }> 
 }
 
 export function queueForSync(tableName: string, operation: 'insert' | 'update' | 'delete', data: unknown) {
-  addToSyncQueue({
-    id: generateId(),
-    table_name: tableName,
-    operation,
-    data: data as Record<string, unknown>,
-    created_at: new Date().toISOString(),
-  });
-
-  syncState.pendingCount++;
-  syncState.status = 'pending';
-  notifySyncState();
-
-  if (isOnline) {
-    triggerSync();
-  }
+  const record = data as Record<string, unknown>;
+  void (async () => {
+    const queue = await getSyncQueue();
+    const existing = queue.find(item => item.table_name === tableName && item.operation !== 'delete' && item.data.id === record.id);
+    if (existing) {
+      await addToSyncQueue({ ...existing, operation, data: record, retry_count: 0, next_retry_at: undefined, last_error: undefined });
+    } else {
+      await addToSyncQueue({ id: generateId(), table_name: tableName, operation, data: record, created_at: new Date().toISOString(), device_id: await getDeviceId() });
+    }
+    syncState.pendingCount = (await getSyncQueue()).length;
+    syncState.status = 'pending';
+    notifySyncState();
+    if (isOnline) void triggerSync();
+  })();
 }
 
 // Generic sync helpers

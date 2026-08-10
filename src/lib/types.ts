@@ -46,6 +46,8 @@ export interface Transaction {
   amount_paid: number;
   change_amount: number;
   payment_method: string;
+  payment_account_id?: string | null;
+  payment_account_name?: string | null;
   status: string;
   notes?: string;
   created_at: string;
@@ -227,7 +229,9 @@ export interface ReconciliationRecord {
   sync_status: EnterpriseSyncStatus;
 }
 
-export type OutboundDeliveryStatus = 'pending' | 'packed' | 'assigned' | 'dispatched' | 'in_transit' | 'delivered' | 'closed' | 'returned';
+export type OutboundDeliveryStatus = 'pending' | 'packed' | 'assigned' | 'dispatched' | 'in_transit' | 'delivered' | 'closed' | 'returned' | 'failed' | 'cancelled';
+export type DeliveryFeeStatus = 'unpaid' | 'partial' | 'paid' | 'waived';
+export type DeliveryPaymentMethod = 'cash' | 'mpesa' | 'card' | 'bank' | 'credit';
 
 export interface OutboundDelivery {
   id: string;
@@ -235,14 +239,28 @@ export interface OutboundDelivery {
   customer_id?: string;
   status: OutboundDeliveryStatus;
   address?: string;
+  recipient_name?: string;
+  recipient_phone?: string;
+  delivery_instructions?: string;
   courier?: string;
   driver?: string;
   vehicle?: string;
   eta?: string;
+  scheduled_at?: string;
+  dispatched_at?: string;
+  delivered_at?: string;
+  delivery_fee?: number;
+  delivery_fee_paid?: number;
+  delivery_fee_status?: DeliveryFeeStatus;
+  delivery_payment_method?: DeliveryPaymentMethod;
+  delivery_payment_reference?: string;
   cod_amount?: number;
+  cod_collected?: number;
   cod_status?: 'pending' | 'collected' | 'failed' | 'not_applicable';
   proof_type?: 'signature' | 'photo' | 'otp' | 'qr';
   proof_reference?: string;
+  exception_reason?: string;
+  notes?: string;
   created_at: string;
   updated_at: string;
   sync_status: EnterpriseSyncStatus;

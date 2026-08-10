@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Plus, Minus, Trash2, Search, User, ShoppingCart, Banknote, CreditCard, Smartphone, X, Package, Archive, ArchiveRestore, Loader2, CheckCircle2, XCircle, AlertCircle, Clock, FlaskConical, Zap, Printer } from 'lucide-react';
-import { generateId, saveProduct, getAllProducts, getAllCustomers, saveCustomer, getKCBSettings, getBusinessSettings, getReceiptSettings, getTransaction } from '../lib/db';
+import { generateId, saveProduct, getAllProducts, getAllCustomers, saveCustomer, getKCBSettings, getBusinessSettings, getReceiptSettings, getTransaction, getAllPaymentAccounts } from '../lib/db';
 import { syncInsertCustomer, syncInsertProduct, getSupabase } from '../lib/sync';
 import { logSaleCompleted, logCustomerCreated } from '../lib/audit';
 import { useAuth } from '../context/AuthContext';
@@ -11,6 +11,7 @@ import { printReceipt, saveReceiptToHistory, getReceiptHistory } from '../lib/pr
 import { useDebounce } from '../hooks/useDebounce';
 import { SaleTypeSelector } from '../components/SaleTypeSelector';
 import type { Product, Customer, CartItem, SaleType } from '../lib/types';
+import type { PaymentAccount } from '../lib/settings-types';
 
 const LOYALTY_POINTS_PER_SHILLING = 100;
 
@@ -33,6 +34,8 @@ const POSTerminal = () => {
   const [customerSearch, setCustomerSearch] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'kcb'>('cash');
+  const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
+  const [paymentAccountId, setPaymentAccountId] = useState<string | null>(null);
   const [amountPaid, setAmountPaid] = useState('');
   const [showCheckout, setShowCheckout] = useState(false);
   const [showNewCustomer, setShowNewCustomer] = useState(false);
@@ -96,13 +99,17 @@ const POSTerminal = () => {
   }, [kcbStatus, kcbStartTime]);
 
   const loadData = async () => {
-    const [prods, custs, idbMpesa] = await Promise.all([
+    const [prods, custs, idbMpesa, accounts] = await Promise.all([
       getAllProducts(),
       getAllCustomers(),
       getKCBSettings(),
+      getAllPaymentAccounts(),
     ]);
     setProducts(prods.filter(p => p.is_active));
     setCustomers(custs);
+    setPaymentAccounts(accounts);
+    
+    if (accounts.length > 0 && !paymentAccountId) setPaymentAccountId(accounts[0].id);
 
     // Always try Supabase first for KCB settings (authoritative source)
     let kcbSettings = idbMpesa;
@@ -348,9 +355,11 @@ const POSTerminal = () => {
       paymentMethod: 'kcb',
       amountPaid: cartTotal,
       change: 0,
-      userId: user?.id || 'system',
-      mpesaReceipt,
-    });
+  userId: user?.id || 'system',
+  mpesaReceipt,
+  paymentAccountId,
+  paymentAccountName: paymentAccounts.find((account) => account.id === paymentAccountId)?.name ?? null,
+  });
 
     if (result.success) {
       await logSaleCompleted(result.transactionId, { cart, total_amount: cartTotal }, user?.id);
@@ -508,8 +517,10 @@ const POSTerminal = () => {
       paymentMethod,
       amountPaid: paid,
       change: (saleType === 'lipa_mdogo' || saleType === 'kyama') ? 0 : change,
-      userId: user?.id || 'system',
-      saleType,
+  userId: user?.id || 'system',
+  paymentAccountId,
+  paymentAccountName: paymentAccounts.find((account) => account.id === paymentAccountId)?.name ?? null,
+  saleType,
       depositAmount: (saleType === 'lipa_mdogo' || saleType === 'kyama') ? depositAmount : 0,
       balanceAmount: (saleType === 'lipa_mdogo' || saleType === 'kyama') ? (cartTotal - depositAmount) : 0,
     });
@@ -1144,7 +1155,18 @@ const POSTerminal = () => {
               {/* Cash/Card Payment Section */}
               {paymentMethod !== 'kcb' && (
                 <>
-                  {/* Amount Paid */}
+                  {paymentAccounts.length > 0 && paymentMethod !== 'cash' && (
+    <div className="mt-4">
+      <label className="mb-2 block text-sm text-slate-400">Payment Account</label>
+      <select value={paymentAccountId ?? ''} onChange={(event) => setPaymentAccountId(event.target.value || null)} className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white">
+        <option value="">No linked account</option>
+        {paymentAccounts.filter((account) => account.status === 'ACTIVE').map((account) => <option key={account.id} value={account.id}>{account.name} — {account.institution}</option>)}
+      </select>
+      <p className="mt-1 text-xs text-slate-500">Selected account is saved locally and synchronizes when connectivity returns.</p>
+    </div>
+  )}
+
+  {/* Amount Paid */}
                   <div>
                     <label className="text-sm text-slate-400 block mb-2">
                       {saleType === 'lipa_mdogo' || saleType === 'kyama' 

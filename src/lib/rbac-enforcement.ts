@@ -49,7 +49,7 @@ export async function enforceRouteAccess(
   }
 
   // Admin bypasses permission checks
-  if (user.role_code === 'admin') {
+  if (user.role_code === 'admin' || user.role_code === 'administrator') {
     return {
       allowed: true,
       message: 'Route access granted',
@@ -110,7 +110,7 @@ export async function enforceFeatureAccess(
   }
 
   // Admin bypasses permission checks
-  if (user.role_code === 'admin') {
+  if (user.role_code === 'admin' || user.role_code === 'administrator') {
     return { allowed: true, message: 'Feature access granted' };
   }
 
@@ -166,7 +166,7 @@ export async function enforceComponentAccess(
   }
 
   // Admin bypasses permission checks
-  if (user.role_code === 'admin') {
+  if (user.role_code === 'admin' || user.role_code === 'administrator') {
     return { allowed: true, message: 'Component access granted' };
   }
 
@@ -204,7 +204,7 @@ export async function enforceActionAccess(
     };
   }
 
-  if (user.role_code === 'admin') {
+  if (user.role_code === 'admin' || user.role_code === 'administrator') {
     return { allowed: true, message: `Action ${action} allowed` };
   }
 
@@ -246,7 +246,7 @@ export async function enforceAnyActionAccess(
     };
   }
 
-  if (user.role_code === 'admin') {
+  if (user.role_code === 'admin' || user.role_code === 'administrator') {
     return { allowed: true, message: `Action ${action} allowed` };
   }
 
