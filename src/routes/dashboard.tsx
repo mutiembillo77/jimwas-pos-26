@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { TrendingUp, DollarSign, ShoppingCart, Users, CreditCard, Star, Calendar, FileText, Printer, Download, Search, RefreshCw } from 'lucide-react';
+import { TrendingUp, DollarSign, ShoppingCart, Users, CreditCard, Star, Calendar, FileText, Printer, Download, Search, RefreshCw, X } from 'lucide-react';
 import { getAllTransactions, getAllCustomers, getAllInstallmentPlans, getAllProducts } from '../lib/db';
 import { getTodaySummary, getWeekSummary, getMonthSummary, formatCurrency } from '../lib/ledger';
 import { KCBDashboardWidget } from '../components/MpesaDashboardWidget';
@@ -155,9 +155,9 @@ export function DashboardPage() {
       const stock = product?.stock ?? 0;
       const stockClass = stock <= 0 ? 'out' : stock <= (product?.low_stock_alert || 5) ? 'low' : 'ok';
       const customer = customers.find((entry) => entry.id === tx.customer_id)?.name || 'Walk-in';
-      return `<tr><td>${new Date(tx.created_at).toLocaleDateString()}<br><small>${new Date(tx.created_at).toLocaleTimeString()}</small></td><td>${customer}</td><td><strong>${item.product_name}</strong><br><small>${item.quantity} × KES ${item.unit_price.toLocaleString()}</small></td><td>${item.quantity}</td><td class="${stockClass}">${stock <= 0 ? 'Out of stock' : `${stock} in stock`}</td><td>KES ${item.subtotal.toLocaleString()}</td><td>${tx.payment_method}</td></tr>`;
+      return `<tr><td>${new Date(tx.created_at).toLocaleDateString()}<br><small>${new Date(tx.created_at).toLocaleTimeString()}</small></td><td>${customer}</td><td><strong>${item.product_name}</strong></td><td class="text-right">${item.quantity}</td><td class="text-right">KES ${(item.unit_price ?? 0).toLocaleString()}</td><td class="text-right">KES ${(item.subtotal ?? 0).toLocaleString()}</td><td>${tx.payment_method.replace('_', ' ')}</td><td class="${stockClass}"><strong>${stock}</strong> in stock</td><td>${tx.payment_account_name || tx.payment_account_id || 'None'}</td></tr>`;
     })).join('');
-    const html = `<!doctype html><html><head><title>Jimwas POS Detailed Report</title><style>body{font:13px Arial,sans-serif;color:#172033;margin:28px}h1{margin:0 0 4px}p{color:#64748b}.actions{margin:18px 0}button{padding:10px 16px;border:0;border-radius:6px;background:#059669;color:white;font-weight:700}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #dbe3ee;padding:8px;text-align:left;vertical-align:top}th{background:#eaf1f7}small{color:#64748b}.ok{color:#047857;background:#ecfdf5;font-weight:700}.low{color:#b45309;background:#fffbeb;font-weight:700}.out{color:#b91c1c;background:#fef2f2;font-weight:700}@media print{.actions{display:none}@page{margin:12mm}}</style></head><body><h1>Jimwas POS — Detailed Sales Report</h1><p>Period: ${timeRange === 'today' ? 'Today' : timeRange === 'week' ? 'This Week' : 'This Month'} | Generated: ${generatedAt.toLocaleString()}</p><div class="actions"><button onclick="window.print()">Print / Save as PDF</button></div><table><thead><tr><th>Date & time</th><th>Customer</th><th>Full item description</th><th>Qty</th><th>Current stock</th><th>Amount</th><th>Payment</th></tr></thead><tbody>${rows || '<tr><td colspan="7">No transactions for this period</td></tr>'}</tbody></table><p>Paybill No. 522522 | A/C No. 7941675</p><p><strong>Thank You For Shopping With Us</strong></p></body></html>`;
+    const html = `<!doctype html><html><head><title>Jimwas POS Detailed Sales Report</title><style>body{font:13px Arial,sans-serif;color:#172033;margin:28px}h1{margin:0 0 4px}p{color:#64748b}.actions{margin:12px 0}.actions button{padding:6px 12px;background:#10b981;color:#fff;border:0;border-radius:4px;cursor:pointer;font-size:12px}table{width:100%;border-collapse:collapse;margin-top:16px}th{background:#f3f4f6;padding:8px;text-align:left;font-weight:600;border-bottom:1px solid #d1d5db}td{padding:8px;border-bottom:1px solid #e5e7eb}.out{background:#fee2e2;color:#7f1d1d}.low{background:#fef3c7;color:#78350f}.ok{background:#dcfce7;color:#166534}</style></head><body><h1>Jimwas POS - Detailed Sales Report</h1><p><strong>Generated:</strong> ${generatedAt.toLocaleString()}</p><p><strong>Payment Method:</strong> ${paymentMethod === 'all' ? 'All Methods' : paymentMethod}</p><p><strong>Payment Account:</strong> ${paymentAccount === 'all' ? 'All Accounts' : paymentAccount}</p><table><thead><tr><th>Date & Time</th><th>Customer</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>Total</th><th>Method</th><th>Stock</th><th>Account</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
     const reportWindow = window.open('', '_blank');
     if (!reportWindow) return;
     reportWindow.document.open();
@@ -177,14 +177,14 @@ export function DashboardPage() {
       {/* Dashboard Controls */}
       <div className="flex flex-col gap-3 rounded-xl bg-slate-800 p-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-2 bg-slate-700/70 rounded-lg p-1">
-          {(['today', 'week', 'month'] as const).map((range) => <button key={range} onClick={() => setTimeRange(range)} className={`px-4 py-2 rounded-md text-sm font-medium transition ${timeRange === range ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>{range === 'today' ? 'Today' : range === 'week' ? 'This Week' : 'This Month'}</button>)}
+          {(['today', 'week', 'month'] as const).map((range) => <button key={range} onClick={() => setTimeRange(range)} className={`px-4 py-2 rounded-md text-sm font-medium transition ${timeRange === range ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:text-white'}`}>{range.charAt(0).toUpperCase() + range.slice(1)}</button>)}
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <label className="flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm text-slate-300"><Search size={16} /><span className="sr-only">Search by date</span><input type="date" value={searchDate} onChange={(event) => setSearchDate(event.target.value)} className="bg-transparent text-white outline-none" /></label>
-          <label className="rounded-lg bg-slate-700 px-3 py-2 text-sm text-slate-300"><span className="sr-only">Filter payment method</span><select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)} className="bg-transparent text-white outline-none"><option value="all">All methods</option>{paymentMethods.map((method) => <option key={method} value={method}>{method.replace('_', ' ')}</option>)}</select></label>
-          <label className="rounded-lg bg-slate-700 px-3 py-2 text-sm text-slate-300"><span className="sr-only">Filter payment account</span><select value={paymentAccount} onChange={(event) => setPaymentAccount(event.target.value)} className="max-w-40 bg-transparent text-white outline-none"><option value="all">All accounts</option>{paymentAccounts.map((account) => <option key={account} value={account}>{account === 'unassigned' ? 'Unassigned' : account.split('|')[1]}</option>)}</select></label>
-          <label className="rounded-lg bg-slate-700 px-3 py-2 text-sm text-slate-300"><span className="sr-only">Search by day</span><select value={searchDay} onChange={(event) => setSearchDay(event.target.value)} className="bg-transparent text-white outline-none"><option value="all">All days</option><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option></select></label>
-          {(searchDate || searchDay !== 'all') && <button onClick={() => { setSearchDate(''); setSearchDay('all'); }} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-slate-700"><RefreshCw size={15} /> Clear</button>}
+          <label className="rounded-lg bg-slate-700 px-3 py-2 text-sm text-slate-300"><span className="sr-only">Filter payment method</span><select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)} className="bg-transparent text-white outline-none"><option value="all">All Methods</option>{paymentMethods.map((method) => <option key={method} value={method}>{method.replace('_', ' ').toUpperCase()}</option>)}</select></label>
+          <label className="rounded-lg bg-slate-700 px-3 py-2 text-sm text-slate-300"><span className="sr-only">Filter payment account</span><select value={paymentAccount} onChange={(event) => setPaymentAccount(event.target.value)} className="bg-transparent text-white outline-none"><option value="all">All Accounts</option>{paymentAccounts.map((account) => <option key={account} value={account}>{account === 'unassigned' ? 'Unassigned' : account.split('|')[1]}</option>)}</select></label>
+          <label className="rounded-lg bg-slate-700 px-3 py-2 text-sm text-slate-300"><span className="sr-only">Search by day</span><select value={searchDay} onChange={(event) => setSearchDay(event.target.value)} className="bg-transparent text-white outline-none"><option value="all">All Days</option><option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option></select></label>
+          {(searchDate || searchDay !== 'all') && <button onClick={() => { setSearchDate(''); setSearchDay('all'); }} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-400 hover:text-slate-200"><X size={16} />Clear</button>}
         </div>
       </div>
       <div className="flex items-center gap-4">
@@ -274,7 +274,7 @@ export function DashboardPage() {
       </div>
 
       {/* M-Pesa Dashboard Widget */}
-        <KCBDashboardWidget timeRange={timeRange} />
+      <KCBDashboardWidget timeRange={timeRange} />
 
       {/* Charts and Tables */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
@@ -284,9 +284,24 @@ export function DashboardPage() {
             <TrendingUp size={18} className="text-emerald-400" />
             Sales Overview
           </h3>
-          {isLoading ? <p className="h-64 flex items-center justify-center text-slate-400">Loading sales data...</p> : salesByDay.length === 0 || salesByDay.every((day) => day.revenue === 0) ? <div className="h-64 flex flex-col items-center justify-center gap-2 text-slate-400"><TrendingUp size={28} className="text-slate-600" /><p>No sales recorded for this period</p><p className="text-xs">Try another date or day filter.</p></div> : <div className="h-64 flex items-end gap-2 border-b border-slate-700 pb-1">
-            {salesByDay.map((day, i) => { const height = (day.revenue / maxRevenue) * 100; const date = new Date(`${day.date}T12:00:00`); return <div key={i} className="group flex h-full flex-1 flex-col items-center justify-end gap-1"><div className="relative flex w-full flex-1 items-end"><div className="w-full rounded-t bg-emerald-600 transition-all group-hover:bg-emerald-400" style={{ height: `${Math.max(height, 3)}%` }} title={`KES ${day.revenue.toLocaleString()}`} /><span className="absolute bottom-full left-1/2 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded bg-slate-950 px-2 py-1 text-xs text-white group-hover:block">KES {day.revenue.toLocaleString()}</span></div><span className="text-xs text-slate-400">{date.toLocaleDateString('en-US', { weekday: 'short' })}</span></div>; })}
-          </div>}
+          {isLoading ? (
+            <p className="h-64 flex items-center justify-center text-slate-400">Loading sales data...</p>
+          ) : salesByDay.length === 0 || salesByDay.every((day) => day.revenue === 0) ? (
+            <div className="h-64 flex items-center justify-center text-slate-400">No sales data for this period</div>
+          ) : (
+            <div className="flex h-64 items-end gap-1">
+              {salesByDay.map((day, i) => {
+                const height = (day.revenue / maxRevenue) * 100;
+                const date = new Date(`${day.date}T12:00:00`);
+                return (
+                  <div key={i} className="group flex h-full flex-1 flex-col items-center justify-end gap-1" style={{ minHeight: '100%' }}>
+                    <div className="w-full rounded-t bg-emerald-600/60 hover:bg-emerald-600" style={{ height: `${height}%`, minHeight: '4px' }} />
+                    <span className="hidden text-xs text-slate-400 group-hover:inline">{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Top Products */}
@@ -316,17 +331,150 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* Detailed Report */}
+      {/* Detailed Sales Report with Enhanced Filters */}
       <div className="bg-slate-800 rounded-xl p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
-          <div className="flex items-center gap-2"><FileText size={18} className="text-emerald-400" /><div><h3 className="font-medium text-white">Detailed Sales Report</h3><p className="text-xs text-slate-400">Full item descriptions and exact stock as of report generation</p></div></div>
           <div className="flex items-center gap-2">
-            <button onClick={() => openDetailedReport(true)} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500"><Download size={16} /> Generate PDF Report</button>
-            <button onClick={() => openDetailedReport(true)} className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600"><Printer size={16} /> Print Report</button>
+            <FileText size={18} className="text-emerald-400" />
+            <div>
+              <h3 className="font-medium text-white">Detailed Sales Report</h3>
+              <p className="text-xs text-slate-400">Full item descriptions and exact stock as of report generation by accounts and payment methods</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => openDetailedReport(false)} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500"><Download size={16} />Export</button>
+            <button onClick={() => openDetailedReport(true)} className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600"><Printer size={16} />Print</button>
           </div>
         </div>
-        <div className="mb-3 flex flex-wrap gap-2 text-xs"><span className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-1 text-emerald-300">Healthy stock</span><span className="rounded-full border border-amber-500/30 bg-amber-500/15 px-2 py-1 text-amber-300">Low stock</span><span className="rounded-full border border-red-500/30 bg-red-500/15 px-2 py-1 text-red-300">Out of stock</span></div>
-        <div className="overflow-x-auto"><table className="w-full min-w-[900px]"><thead><tr className="border-b border-slate-700 text-left text-xs uppercase tracking-wide text-slate-400"><th className="pb-3">Date & time</th><th className="pb-3">Customer</th><th className="pb-3">Full item description</th><th className="pb-3">Qty</th><th className="pb-3">Current stock</th><th className="pb-3 text-right">Amount</th><th className="pb-3 text-right">Payment</th></tr></thead><tbody className="divide-y divide-slate-700">{recentTransactions.flatMap((tx) => (tx.items ?? []).map((item) => { const product = stockByProduct.get(item.product_id); const stock = stockLabel(product?.stock ?? 0, product?.low_stock_alert || 5); return <tr key={`${tx.id}-${item.id}`} className="text-sm"><td className="py-3 text-slate-300">{new Date(tx.created_at).toLocaleDateString()}<br /><span className="text-xs text-slate-500">{new Date(tx.created_at).toLocaleTimeString()}</span></td><td className="py-3 text-white">{customers.find((customer) => customer.id === tx.customer_id)?.name || 'Walk-in'}</td><td className="py-3 text-white"><div>{item.product_name}</div><div className="text-xs text-slate-500">KES {item.unit_price.toLocaleString()} each</div></td><td className="py-3 text-slate-300">{item.quantity}</td><td className="py-3"><span className={`rounded-full border px-2 py-1 text-xs ${stock.className}`}>{stock.label}</span></td><td className="py-3 text-right text-emerald-400">KES {item.subtotal.toLocaleString()}</td><td className="py-3 text-right text-slate-300">{tx.payment_method}</td></tr>; }))}</tbody></table>{recentTransactions.length === 0 && <p className="py-8 text-center text-slate-400">No detailed transactions for this period</p>}</div>
+
+        {/* Enhanced Report Filters */}
+        <div className="mb-4 flex flex-wrap gap-3">
+          <label className="flex items-center gap-2 text-xs text-slate-400">
+            <span className="font-medium">Payment Method:</span>
+            <select
+              value={paymentMethod}
+              onChange={(event) => setPaymentMethod(event.target.value)}
+              className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            >
+              <option value="all">All Methods</option>
+              {paymentMethods.map((method) => (
+                <option key={method} value={method}>
+                  {method.replace('_', ' ').toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex items-center gap-2 text-xs text-slate-400">
+            <span className="font-medium">Payment Account:</span>
+            <select
+              value={paymentAccount}
+              onChange={(event) => setPaymentAccount(event.target.value)}
+              className="rounded-lg border border-slate-600 bg-slate-900 px-2 py-1 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            >
+              <option value="all">All Accounts</option>
+              {paymentAccounts.map((account) => (
+                <option key={account} value={account}>
+                  {account === 'unassigned' ? 'Unassigned' : account.split('|')[1]}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {(paymentMethod !== 'all' || paymentAccount !== 'all') && (
+            <button
+              onClick={() => {
+                setPaymentMethod('all');
+                setPaymentAccount('all');
+              }}
+              className="ml-auto rounded-lg bg-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-600"
+            >
+              Clear Filters
+            </button>
+          )}
+        </div>
+
+        <div className="mb-3 flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-1 text-emerald-300">✓ Healthy stock</span>
+          <span className="rounded-full border border-amber-500/30 bg-amber-500/15 px-2 py-1 text-amber-300">⚠ Low stock</span>
+          <span className="rounded-full border border-red-500/30 bg-red-500/15 px-2 py-1 text-red-300">✗ Out of stock</span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1200px]">
+            <thead>
+              <tr className="border-b border-slate-700 text-left text-xs uppercase tracking-wide text-slate-400">
+                <th className="px-4 py-3">Date & Time</th>
+                <th className="px-4 py-3">Customer</th>
+                <th className="px-4 py-3">Product</th>
+                <th className="px-4 py-3 text-right">Qty</th>
+                <th className="px-4 py-3 text-right">Unit Price</th>
+                <th className="px-4 py-3 text-right">Total</th>
+                <th className="px-4 py-3">Payment Method</th>
+                <th className="px-4 py-3">Stock Status</th>
+                <th className="px-4 py-3">Account</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-700">
+              {filteredTransactions.length > 0 ? (
+                filteredTransactions.slice(0, 50).flatMap((tx) =>
+                  (tx.items ?? []).map((item, idx) => {
+                    const product = stockByProduct.get(item.product_id);
+                    const stock = product?.stock ?? 0;
+                    const customer = customers.find((c) => c.id === tx.customer_id)?.name || 'Walk-in';
+                    const accountName = tx.payment_account_name || tx.payment_account_id || 'None';
+
+                    return (
+                      <tr key={`${tx.id}-${idx}`} className="hover:bg-slate-700/50">
+                        <td className="px-4 py-3 text-sm text-slate-300">
+                          {new Date(tx.created_at).toLocaleDateString()}
+                          <br />
+                          <small>{new Date(tx.created_at).toLocaleTimeString()}</small>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-white">{customer}</td>
+                        <td className="px-4 py-3 text-sm font-medium text-white">
+                          {item.product_name}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm text-slate-300">
+                          {item.quantity}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm text-slate-300">
+                          KES {(item.unit_price ?? 0).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm font-medium text-emerald-400">
+                          KES {(item.subtotal ?? 0).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-300 capitalize">
+                          {tx.payment_method.replace('_', ' ')}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`rounded-full border px-2 py-1 text-xs font-medium ${
+                              stock <= 0
+                                ? 'border-red-500/30 bg-red-500/15 text-red-300'
+                                : stock <= (product?.low_stock_alert || 5)
+                                  ? 'border-amber-500/30 bg-amber-500/15 text-amber-300'
+                                  : 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+                            }`}
+                          >
+                            {stock} in stock
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-300">{accountName}</td>
+                      </tr>
+                    );
+                  })
+                )
+              ) : (
+                <tr>
+                  <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                    No transactions for the selected filters
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Recent Transactions */}
