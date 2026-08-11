@@ -63,6 +63,52 @@ export function getSyncState(): SyncState {
   return { ...syncState };
 }
 
+export interface SyncQueueItem {
+  id: string;
+  table_name: string;
+  operation: string;
+  data: Record<string, unknown>;
+  created_at: string;
+  device_id?: string;
+  retry_count?: number;
+  next_retry_at?: string;
+  last_error?: string;
+}
+
+export async function getSyncQueueItems(): Promise<SyncQueueItem[]> {
+  return (await getSyncQueue()) as SyncQueueItem[];
+}
+
+export async function retrySyncItem(id: string): Promise<{ success: boolean; message: string }> {
+  const item = (await getSyncQueueItems()).find((entry) => entry.id === id);
+  if (!item) return { success: false, message: 'Queue item not found' };
+  try {
+    await processSyncItem(item);
+    await removeFromSyncQueue(item.id);
+    await checkPendingCount();
+    return { success: true, message: 'Item synced successfully' };
+  } catch (error) {
+    await addToSyncQueue({ ...item, operation: item.operation as 'insert' | 'update' | 'delete', retry_count: (item.retry_count ?? 0) + 1, next_retry_at: undefined, last_error: error instanceof Error ? error.message : 'Sync failed' } as any);
+    syncState.failedCount += 1;
+    syncState.status = 'degraded';
+    syncState.error = error instanceof Error ? error.message : 'Sync failed';
+    notifySyncState();
+    return { success: false, message: syncState.error };
+  }
+}
+
+export async function retryAllSyncItems(): Promise<{ success: number; failed: number }> {
+  const items = await getSyncQueueItems();
+  let success = 0;
+  let failed = 0;
+  for (const item of items) {
+    const result = await retrySyncItem(item.id);
+    result.success ? success++ : failed++;
+  }
+  await checkPendingCount();
+  return { success, failed };
+}
+
 export function initNetworkListeners() {
   if (typeof window === 'undefined') return;
   window.addEventListener('online', () => {
@@ -144,8 +190,9 @@ async function triggerSync() {
     syncState.status = failCount > 0 || syncState.error ? 'degraded' : 'synced';
     syncState.lastSync = failCount > 0 || syncState.error ? syncState.lastSync : new Date().toISOString();
     syncState.lastPush = new Date().toISOString();
-    syncState.pendingCount = (await getSyncQueue()).length;
-    syncState.failedCount = failCount;
+    const remainingQueue = await getSyncQueueItems();
+    syncState.pendingCount = remainingQueue.length;
+    syncState.failedCount = remainingQueue.filter((item) => (item.retry_count ?? 0) > 0).length;
 
     if (failCount > 0 && !syncState.error) {
       syncState.error = `${failCount} items failed to sync`;

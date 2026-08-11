@@ -39,6 +39,35 @@ export interface TransactionItem {
   subtotal: number;
 }
 
+export type CODStatus = 'PENDING' | 'CONFIRMED' | 'DISPATCHED' | 'DELIVERED' | 'PARTIALLY_PAID' | 'PAID' | 'CANCELLED' | 'DELIVERY_FAILED' | 'RETURNED';
+
+export interface CODPayment {
+  id: string;
+  transaction_id: string;
+  amount: number;
+  amount_applied: number;
+  change_amount: number;
+  payment_method: string;
+  payment_account_id?: string | null;
+  payment_account_name?: string | null;
+  reference?: string;
+  notes?: string;
+  created_at: string;
+  device_id: string;
+  sync_status: EnterpriseSyncStatus;
+}
+
+export interface CODReceipt {
+  id: string;
+  receipt_number: string;
+  transaction_id: string;
+  payment_id: string;
+  receipt_type: 'cod_order' | 'cod_payment' | 'delivery_note';
+  amount: number;
+  issued_at: string;
+  sync_status: EnterpriseSyncStatus;
+}
+
 export interface Transaction {
   id: string;
   customer_id?: string;
@@ -56,6 +85,12 @@ export interface Transaction {
   sale_type?: SaleType;
   deposit_amount?: number;
   balance_amount?: number;
+  cod_status?: CODStatus;
+  cod_order_id?: string;
+  delivery_address?: string;
+  delivery_contact?: string;
+  consignment_number?: string;
+  cod_payments?: CODPayment[];
 }
 
 export interface InstallmentPlan {

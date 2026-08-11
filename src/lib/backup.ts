@@ -20,8 +20,14 @@ import {
   getBusinessSettings,
   getKCBSettings,
   getAllPaymentMethods,
+  getAllPaymentAccounts,
+  savePaymentAccount,
   getLoyaltySettings,
   getReceiptSettings,
+  getAllCODPayments,
+  getAllCODReceipts,
+  saveCODPayment,
+  saveCODReceipt,
   // Save functions
   saveCustomer,
   saveProduct,
@@ -69,8 +75,11 @@ export interface BackupData {
     business_settings: unknown | null;
     mpesa_settings: unknown | null;
     payment_methods: unknown[];
+    payment_accounts: unknown[];
     loyalty_settings: unknown | null;
     receipt_settings: unknown | null;
+    cod_payments: unknown[];
+    cod_receipts: unknown[];
   };
   counts: {
     customers: number;
@@ -109,8 +118,11 @@ export async function exportBackup(exportedBy?: string): Promise<BackupData> {
     businessSettings,
     mpesaSettings,
     paymentMethods,
+    paymentAccounts,
     loyaltySettings,
     receiptSettings,
+    codPayments,
+    codReceipts,
   ] = await Promise.all([
     getAllCustomers(),
     getAllProducts(),
@@ -129,8 +141,11 @@ export async function exportBackup(exportedBy?: string): Promise<BackupData> {
     getBusinessSettings(),
     getKCBSettings(),
     getAllPaymentMethods(),
+    getAllPaymentAccounts(),
     getLoyaltySettings(),
     getReceiptSettings(),
+    getAllCODPayments(),
+    getAllCODReceipts(),
   ]);
 
   const backup: BackupData = {
@@ -156,8 +171,11 @@ export async function exportBackup(exportedBy?: string): Promise<BackupData> {
       business_settings: businessSettings,
       mpesa_settings: mpesaSettings,
       payment_methods: paymentMethods,
+      payment_accounts: paymentAccounts,
       loyalty_settings: loyaltySettings,
       receipt_settings: receiptSettings,
+      cod_payments: codPayments,
+      cod_receipts: codReceipts,
     },
     counts: {
       customers: customers.length,
@@ -437,8 +455,18 @@ export async function importBackup(
       }
     }
 
-    // Import settings (if option enabled)
-    if (options.includeSettings) {
+  if (backup.data.cod_payments && Array.isArray(backup.data.cod_payments)) for (const payment of backup.data.cod_payments) { try { await saveCODPayment(payment as any); } catch (e) { result.errors.push(`COD payment: ${e}`); } }
+  if (backup.data.cod_receipts && Array.isArray(backup.data.cod_receipts)) for (const receipt of backup.data.cod_receipts) { try { await saveCODReceipt(receipt as any); } catch (e) { result.errors.push(`COD receipt: ${e}`); } }
+
+  // Import payment accounts
+  if (backup.data.payment_accounts && Array.isArray(backup.data.payment_accounts)) {
+    for (const account of backup.data.payment_accounts) {
+      try { await savePaymentAccount(account as any); } catch (e) { result.errors.push(`Payment account: ${e}`); }
+    }
+  }
+
+  // Import settings (if option enabled)
+  if (options.includeSettings) {
       if (backup.data.business_settings) {
         try {
           await saveBusinessSettings({ ...backup.data.business_settings, sync_status: 'pending' } as any);
@@ -512,6 +540,14 @@ export function validateBackup(data: unknown): { valid: boolean; error?: string;
 
   if (!backup.data || typeof backup.data !== 'object') {
     return { valid: false, error: 'Invalid backup file: missing data section' };
+  }
+
+  const requiredCollections = ['customers', 'products', 'transactions'] as const;
+  for (const key of requiredCollections) {
+    if (!Array.isArray(backup.data[key])) return { valid: false, error: `Invalid backup file: ${key} must be an array` };
+  }
+  if (Number.isNaN(new Date(backup.exported_at).getTime())) {
+    return { valid: false, error: 'Invalid backup file: exported date is not valid' };
   }
 
   return { valid: true, backup };
