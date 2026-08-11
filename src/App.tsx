@@ -25,18 +25,18 @@ function AppContent() {
   const { user, isLoading, isAuthenticated } = useAuth();
 
   useEffect(() => {
-    initNetworkListeners();
+    try {
+      initNetworkListeners();
+    } catch (error) {
+      console.warn('[v0] Network listener setup skipped:', error);
+    }
 
-    // Delay initial sync to avoid blocking UI
+    // Sync is strictly background work; never hold the first render hostage.
     const syncTimer = setTimeout(() => {
-      import('./lib/sync').then(({ syncNow }) => {
-        syncNow().then((result) => {
-          console.log('Initial sync:', result.message);
-        }).catch(err => {
-          console.error('Initial sync failed:', err);
-        });
+      void import('./lib/sync').then(({ syncNow }) => syncNow()).catch((error) => {
+        console.warn('[v0] Background sync skipped:', error);
       });
-    }, 2000);
+    }, 5000);
 
     return () => clearTimeout(syncTimer);
   }, []);

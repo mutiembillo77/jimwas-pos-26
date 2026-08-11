@@ -46,6 +46,8 @@ export interface PaymentAccount {
   institution: string;
   account_type: 'BANK' | 'MOBILE_MONEY' | 'CARD' | 'CASH';
   account_number_masked?: string;
+  paybill_number?: string;
+  account_number?: string;
   business_category: BusinessCategory;
   currency: string;
   status: 'ACTIVE' | 'INACTIVE';
@@ -57,8 +59,8 @@ export interface PaymentAccount {
 }
 
 export const DEFAULT_PAYMENT_ACCOUNTS: PaymentAccount[] = [
-  { id: 'payment-account-furniture-ncba', code: 'FURNITURE-NCBA', name: 'Furniture-NCBA', institution: 'NCBA', account_type: 'BANK', business_category: 'FURNITURE', currency: 'KES', status: 'ACTIVE', is_default: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), sync_status: 'pending' },
-  { id: 'payment-account-household-kcb', code: 'HOUSEHOLD-KCB', name: 'Household-KCB', institution: 'KCB', account_type: 'BANK', business_category: 'HOUSEHOLD', currency: 'KES', status: 'ACTIVE', is_default: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), sync_status: 'pending' },
+  { id: 'payment-account-kcb', code: 'KCB-PAYBILL-522522', name: 'KCB A/C 7941675', institution: 'KCB', account_type: 'MOBILE_MONEY', paybill_number: '522522', account_number: '7941675', account_number_masked: '••••675', business_category: 'ANY', currency: 'KES', status: 'ACTIVE', is_default: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), sync_status: 'pending' },
+  { id: 'payment-account-ncba', code: 'NCBA-PAYBILL-880100', name: 'NCBA A/C 166294', institution: 'NCBA', account_type: 'MOBILE_MONEY', paybill_number: '880100', account_number: '166294', account_number_masked: '••••294', business_category: 'ANY', currency: 'KES', status: 'ACTIVE', is_default: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), sync_status: 'pending' },
 ];
 
 export interface PaymentMethodConfig {

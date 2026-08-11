@@ -23,7 +23,10 @@ export async function initializeApp(): Promise<void> {
       // Payment accounts must be seeded independently from first-run settings so
       // upgrades and existing installations receive the destinations too.
       for (const account of DEFAULT_PAYMENT_ACCOUNTS) {
-        if (!(await db.get('payment_accounts', account.id))) await db.put('payment_accounts', account);
+        const existingAccount = await db.get('payment_accounts', account.id);
+        if (!existingAccount || !existingAccount.paybill_number || !existingAccount.account_number) {
+          await db.put('payment_accounts', account);
+        }
       }
 
       // Check if business settings exist
