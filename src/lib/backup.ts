@@ -24,6 +24,10 @@ import {
   savePaymentAccount,
   getLoyaltySettings,
   getReceiptSettings,
+  getAllCODPayments,
+  getAllCODReceipts,
+  saveCODPayment,
+  saveCODReceipt,
   // Save functions
   saveCustomer,
   saveProduct,
@@ -74,6 +78,8 @@ export interface BackupData {
     payment_accounts: unknown[];
     loyalty_settings: unknown | null;
     receipt_settings: unknown | null;
+    cod_payments: unknown[];
+    cod_receipts: unknown[];
   };
   counts: {
     customers: number;
@@ -115,6 +121,8 @@ export async function exportBackup(exportedBy?: string): Promise<BackupData> {
     paymentAccounts,
     loyaltySettings,
     receiptSettings,
+    codPayments,
+    codReceipts,
   ] = await Promise.all([
     getAllCustomers(),
     getAllProducts(),
@@ -136,6 +144,8 @@ export async function exportBackup(exportedBy?: string): Promise<BackupData> {
     getAllPaymentAccounts(),
     getLoyaltySettings(),
     getReceiptSettings(),
+    getAllCODPayments(),
+    getAllCODReceipts(),
   ]);
 
   const backup: BackupData = {
@@ -164,6 +174,8 @@ export async function exportBackup(exportedBy?: string): Promise<BackupData> {
       payment_accounts: paymentAccounts,
       loyalty_settings: loyaltySettings,
       receipt_settings: receiptSettings,
+      cod_payments: codPayments,
+      cod_receipts: codReceipts,
     },
     counts: {
       customers: customers.length,
@@ -442,6 +454,9 @@ export async function importBackup(
         }
       }
     }
+
+  if (backup.data.cod_payments && Array.isArray(backup.data.cod_payments)) for (const payment of backup.data.cod_payments) { try { await saveCODPayment(payment as any); } catch (e) { result.errors.push(`COD payment: ${e}`); } }
+  if (backup.data.cod_receipts && Array.isArray(backup.data.cod_receipts)) for (const receipt of backup.data.cod_receipts) { try { await saveCODReceipt(receipt as any); } catch (e) { result.errors.push(`COD receipt: ${e}`); } }
 
   // Import payment accounts
   if (backup.data.payment_accounts && Array.isArray(backup.data.payment_accounts)) {

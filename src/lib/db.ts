@@ -241,6 +241,8 @@ interface POSDatabase extends DBSchema {
   shifts: { key: string; value: ShiftRecord; indexes: { 'by-status': string; 'by-cashier': string } };
   reconciliations: { key: string; value: ReconciliationRecord; indexes: { 'by-status': string; 'by-method': string } };
   outbound_deliveries: { key: string; value: OutboundDelivery; indexes: { 'by-status': string; 'by-transaction': string } };
+  cod_payments: { key: string; value: import('./types').CODPayment; indexes: { 'by-transaction': string; 'by-reference': string } };
+  cod_receipts: { key: string; value: import('./types').CODReceipt; indexes: { 'by-transaction': string; 'by-payment': string; 'by-number': string } };
   offers: { key: string; value: OfferRule; indexes: { 'by-active': string } };
   supplier_fulfillments: { key: string; value: SupplierFulfillment; indexes: { 'by-transaction': string; 'by-status': string } };
   report_schedules: { key: string; value: ReportSchedule; indexes: { 'by-active': string; 'by-next-run': string } };
@@ -435,7 +437,7 @@ export interface TransactionItem {
 }
 
 const DB_NAME = 'pos-offline-db';
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 
 let dbInstance: IDBPDatabase<POSDatabase> | null = null;
 
@@ -541,7 +543,18 @@ export async function getDB(): Promise<IDBPDatabase<POSDatabase>> {
         store.createIndex('by-status', 'status');
         store.createIndex('by-transaction', 'transaction_id');
       }
-      if (!db.objectStoreNames.contains('offers')) {
+      if (!db.objectStoreNames.contains('cod_payments')) {
+    const store = db.createObjectStore('cod_payments', { keyPath: 'id' });
+    store.createIndex('by-transaction', 'transaction_id');
+    store.createIndex('by-reference', 'reference');
+  }
+  if (!db.objectStoreNames.contains('cod_receipts')) {
+    const store = db.createObjectStore('cod_receipts', { keyPath: 'id' });
+    store.createIndex('by-transaction', 'transaction_id');
+    store.createIndex('by-payment', 'payment_id');
+    store.createIndex('by-number', 'receipt_number');
+  }
+  if (!db.objectStoreNames.contains('offers')) {
         const store = db.createObjectStore('offers', { keyPath: 'id' });
         store.createIndex('by-active', 'is_active');
       }
@@ -1565,7 +1578,14 @@ export async function getReceiptSettings(): Promise<ReceiptSettings | undefined>
 
 // ============ BACKUP & RESTORE OPERATIONS ============
 
-export interface BackupData {
+  export async function saveCODPayment(payment: POSDatabase['cod_payments']['value']) { const db = await getDB(); await db.put('cod_payments', payment); }
+  export async function getCODPaymentsByTransaction(transactionId: string) { const db = await getDB(); return db.getAllFromIndex('cod_payments', 'by-transaction', transactionId); }
+  export async function saveCODReceipt(receipt: POSDatabase['cod_receipts']['value']) { const db = await getDB(); await db.put('cod_receipts', receipt); }
+  export async function getCODReceiptsByTransaction(transactionId: string) { const db = await getDB(); return db.getAllFromIndex('cod_receipts', 'by-transaction', transactionId); }
+  export async function getAllCODPayments() { const db = await getDB(); return db.getAll('cod_payments'); }
+  export async function getAllCODReceipts() { const db = await getDB(); return db.getAll('cod_receipts'); }
+
+  export interface BackupData {
   version: string;
   exported_at: string;
   exported_by?: string;

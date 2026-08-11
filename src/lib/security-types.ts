@@ -171,6 +171,12 @@ export type AuditEventType =
   | 'SALE_VOIDED'
   | 'SALE_REFUNDED'
   | 'SALE_UPDATED'
+  | 'COD_CREATED'
+  | 'COD_PAYMENT_COLLECTED'
+  | 'COD_SETTLED'
+  | 'COD_RECEIPT_GENERATED'
+  | 'COD_DELIVERED'
+  | 'COD_RETURNED'
   // Product events
   | 'PRODUCT_CREATED'
   | 'PRODUCT_UPDATED'
