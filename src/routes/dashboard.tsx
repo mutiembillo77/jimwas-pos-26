@@ -13,6 +13,8 @@ export function DashboardPage() {
   const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month'>('today');
   const [searchDate, setSearchDate] = useState('');
   const [searchDay, setSearchDay] = useState('all');
+  const [paymentMethod, setPaymentMethod] = useState('all');
+  const [paymentAccount, setPaymentAccount] = useState('all');
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -54,6 +56,8 @@ export function DashboardPage() {
     }
   }, [timeRange]);
 
+  const paymentMethods = useMemo(() => [...new Set(transactions.map((tx) => tx.payment_method))].sort(), [transactions]);
+  const paymentAccounts = useMemo(() => [...new Set(transactions.map((tx) => tx.payment_account_id ? `${tx.payment_account_id}|${tx.payment_account_name ?? tx.payment_account_id}` : 'unassigned'))].sort(), [transactions]);
   const filteredTransactions = useMemo(() => {
     return transactions.filter((tx) => {
       if (tx.status === 'voided') return false;
@@ -61,9 +65,10 @@ export function DashboardPage() {
       const localDate = `${txDate.getFullYear()}-${String(txDate.getMonth() + 1).padStart(2, '0')}-${String(txDate.getDate()).padStart(2, '0')}`;
       const dayMatches = searchDay === 'all' || txDate.getDay() === Number(searchDay);
       const dateMatches = !searchDate || localDate === searchDate;
-      return txDate >= dateRange.start && txDate <= dateRange.end && dayMatches && dateMatches;
+      const accountKey = tx.payment_account_id ? `${tx.payment_account_id}|${tx.payment_account_name ?? tx.payment_account_id}` : 'unassigned';
+      return txDate >= dateRange.start && txDate <= dateRange.end && dayMatches && dateMatches && (paymentMethod === 'all' || tx.payment_method === paymentMethod) && (paymentAccount === 'all' || accountKey === paymentAccount);
     });
-  }, [transactions, dateRange]);
+  }, [transactions, dateRange, searchDate, searchDay, paymentMethod, paymentAccount]);
 
   const stats = useMemo(() => {
     const totalRevenue = filteredTransactions.reduce((sum, tx) => sum + tx.amount_paid, 0);
@@ -176,6 +181,8 @@ export function DashboardPage() {
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <label className="flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-sm text-slate-300"><Search size={16} /><span className="sr-only">Search by date</span><input type="date" value={searchDate} onChange={(event) => setSearchDate(event.target.value)} className="bg-transparent text-white outline-none" /></label>
+          <label className="rounded-lg bg-slate-700 px-3 py-2 text-sm text-slate-300"><span className="sr-only">Filter payment method</span><select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)} className="bg-transparent text-white outline-none"><option value="all">All methods</option>{paymentMethods.map((method) => <option key={method} value={method}>{method.replace('_', ' ')}</option>)}</select></label>
+          <label className="rounded-lg bg-slate-700 px-3 py-2 text-sm text-slate-300"><span className="sr-only">Filter payment account</span><select value={paymentAccount} onChange={(event) => setPaymentAccount(event.target.value)} className="max-w-40 bg-transparent text-white outline-none"><option value="all">All accounts</option>{paymentAccounts.map((account) => <option key={account} value={account}>{account === 'unassigned' ? 'Unassigned' : account.split('|')[1]}</option>)}</select></label>
           <label className="rounded-lg bg-slate-700 px-3 py-2 text-sm text-slate-300"><span className="sr-only">Search by day</span><select value={searchDay} onChange={(event) => setSearchDay(event.target.value)} className="bg-transparent text-white outline-none"><option value="all">All days</option><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option></select></label>
           {(searchDate || searchDay !== 'all') && <button onClick={() => { setSearchDate(''); setSearchDay('all'); }} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-slate-700"><RefreshCw size={15} /> Clear</button>}
         </div>
