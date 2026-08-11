@@ -70,7 +70,7 @@ function AppContent() {
 
     switch (currentPage) {
       case 'pos':
-        return <ProtectedRoute routePath="/pos" fallback={accessDenied}><POSTerminal /></ProtectedRoute>;
+        return <ProtectedRoute routePath="/pos" fallback={accessDenied}><POSTerminal onDeliveryRequested={(transactionId) => { setCurrentPage('outbound-deliveries'); window.dispatchEvent(new CustomEvent('jimwas:open-delivery', { detail: { transactionId } })); }} /></ProtectedRoute>;
       case 'customers':
         return <ProtectedRoute routePath="/customers" fallback={accessDenied}><CustomersPage /></ProtectedRoute>;
       case 'products':

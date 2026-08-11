@@ -12,7 +12,7 @@ export interface CompleteSaleParams {
   cartTotal: number;
   products: Product[];
   selectedCustomer: Customer | null;
-  paymentMethod: 'cash' | 'card' | 'mpesa';
+  paymentMethod: 'cash' | 'card' | 'cod' | 'mpesa';
   amountPaid: number;
   change: number;
   userId: string;
