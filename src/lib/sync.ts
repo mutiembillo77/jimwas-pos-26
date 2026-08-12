@@ -209,7 +209,7 @@ async function triggerSync() {
 
 async function processSyncItem(item: { table_name: string; operation: string; data: Record<string, unknown> }) {
   const client = getSupabase();
-  if (!client) return;
+  if (!client) throw new Error('Supabase is not configured. Sync is unavailable while offline.');
   const { table_name, operation, data } = item;
   const table = client.from(table_name);
 
@@ -353,6 +353,7 @@ export async function syncNow(): Promise<{ success: boolean; message: string }> 
 
   try {
     await triggerSync();
+    if (syncState.status === 'degraded' || syncState.status === 'error') return { success: false, message: syncState.error ?? 'Some items failed to sync.' };
     return { success: true, message: 'Sync completed successfully' };
   } catch (error) {
     console.error('Sync error:', error);
