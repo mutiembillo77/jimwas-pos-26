@@ -49,18 +49,6 @@ function buildReceiptHtml(options: PrintOptions): string {
     lines.push(' '.repeat(pad) + name);
   }
 
-  // Jimwas payment instructions are printed on every receipt.
-  lines.push('');
-  lines.push(formatLine('Paybill No.:', '522522'));
-  lines.push(formatLine('A/C No.:', '7941675'));
-  if ((business as any).business_paybill || (business as any).business_account) {
-    if ((business as any).business_paybill && (business as any).business_paybill !== '522522') {
-      lines.push(formatLine('Paybill:', (business as any).business_paybill));
-    }
-    if ((business as any).business_account && (business as any).business_account !== '7941675') {
-      lines.push(formatLine('Account:', (business as any).business_account));
-    }
-  }
   if (business.business_address) lines.push(business.business_address);
   if (business.business_phone) lines.push(`Tel: ${business.business_phone}`);
   if (business.business_email) lines.push(`Email: ${business.business_email}`);
