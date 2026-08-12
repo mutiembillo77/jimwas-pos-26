@@ -16,6 +16,7 @@ import type {
   BusinessSettings,
   KCBSettings,
   PaymentMethodConfig,
+  PaymentAccount,
   LoyaltySettings,
   ReceiptSettings,
 } from './settings-types';
@@ -77,6 +78,8 @@ interface POSDatabase extends DBSchema {
       amount_paid: number;
       change_amount: number;
       payment_method: string;
+      payment_account_id?: string | null;
+      payment_account_name?: string | null;
       status: string;
       notes?: string;
       created_at: string;
@@ -225,11 +228,21 @@ interface POSDatabase extends DBSchema {
       operation: 'insert' | 'update' | 'delete';
       data: Record<string, unknown>;
       created_at: string;
+      retry_count?: number;
+      next_retry_at?: string;
+      last_error?: string;
+      device_id?: string;
     };
+  };
+  sync_metadata: {
+    key: string;
+    value: { key: string; value: string };
   };
   shifts: { key: string; value: ShiftRecord; indexes: { 'by-status': string; 'by-cashier': string } };
   reconciliations: { key: string; value: ReconciliationRecord; indexes: { 'by-status': string; 'by-method': string } };
   outbound_deliveries: { key: string; value: OutboundDelivery; indexes: { 'by-status': string; 'by-transaction': string } };
+  cod_payments: { key: string; value: import('./types').CODPayment; indexes: { 'by-transaction': string; 'by-reference': string } };
+  cod_receipts: { key: string; value: import('./types').CODReceipt; indexes: { 'by-transaction': string; 'by-payment': string; 'by-number': string } };
   offers: { key: string; value: OfferRule; indexes: { 'by-active': string } };
   supplier_fulfillments: { key: string; value: SupplierFulfillment; indexes: { 'by-transaction': string; 'by-status': string } };
   report_schedules: { key: string; value: ReportSchedule; indexes: { 'by-active': string; 'by-next-run': string } };
@@ -325,6 +338,11 @@ interface POSDatabase extends DBSchema {
     key: string;
     value: PaymentMethodConfig;
   };
+  payment_accounts: {
+    key: string;
+    value: PaymentAccount;
+    indexes: { 'by-code': string; 'by-category': string; 'by-status': string };
+  };
   loyalty_settings: {
     key: string;
     value: LoyaltySettings;
@@ -419,7 +437,7 @@ export interface TransactionItem {
 }
 
 const DB_NAME = 'pos-offline-db';
-const DB_VERSION = 7;
+const DB_VERSION = 10;
 
 let dbInstance: IDBPDatabase<POSDatabase> | null = null;
 
@@ -501,10 +519,14 @@ export async function getDB(): Promise<IDBPDatabase<POSDatabase>> {
         adjustmentStore.createIndex('by-product', 'product_id');
       }
 
-      // Sync queue store
-      if (!db.objectStoreNames.contains('sync_queue')) {
-        db.createObjectStore('sync_queue', { keyPath: 'id' });
-      }
+  // Sync queue store
+  if (!db.objectStoreNames.contains('sync_queue')) {
+    db.createObjectStore('sync_queue', { keyPath: 'id' });
+  }
+  if (!db.objectStoreNames.contains('sync_metadata')) {
+    db.createObjectStore('sync_metadata', { keyPath: 'key' });
+  }
+
 
       if (!db.objectStoreNames.contains('shifts')) {
         const store = db.createObjectStore('shifts', { keyPath: 'id' });
@@ -521,7 +543,18 @@ export async function getDB(): Promise<IDBPDatabase<POSDatabase>> {
         store.createIndex('by-status', 'status');
         store.createIndex('by-transaction', 'transaction_id');
       }
-      if (!db.objectStoreNames.contains('offers')) {
+      if (!db.objectStoreNames.contains('cod_payments')) {
+    const store = db.createObjectStore('cod_payments', { keyPath: 'id' });
+    store.createIndex('by-transaction', 'transaction_id');
+    store.createIndex('by-reference', 'reference');
+  }
+  if (!db.objectStoreNames.contains('cod_receipts')) {
+    const store = db.createObjectStore('cod_receipts', { keyPath: 'id' });
+    store.createIndex('by-transaction', 'transaction_id');
+    store.createIndex('by-payment', 'payment_id');
+    store.createIndex('by-number', 'receipt_number');
+  }
+  if (!db.objectStoreNames.contains('offers')) {
         const store = db.createObjectStore('offers', { keyPath: 'id' });
         store.createIndex('by-active', 'is_active');
       }
@@ -640,9 +673,15 @@ export async function getDB(): Promise<IDBPDatabase<POSDatabase>> {
         kcbPaymentStore.createIndex('by-created-at', 'created_at');
       }
 
-      if (!db.objectStoreNames.contains('payment_methods')) {
-        db.createObjectStore('payment_methods', { keyPath: 'id' });
-      }
+  if (!db.objectStoreNames.contains('payment_methods')) {
+    db.createObjectStore('payment_methods', { keyPath: 'id' });
+  }
+  if (!db.objectStoreNames.contains('payment_accounts')) {
+    const accounts = db.createObjectStore('payment_accounts', { keyPath: 'id' });
+    accounts.createIndex('by-code', 'code', { unique: true });
+    accounts.createIndex('by-category', 'business_category');
+    accounts.createIndex('by-status', 'status');
+  }
 
       if (!db.objectStoreNames.contains('loyalty_settings')) {
         db.createObjectStore('loyalty_settings', { keyPath: 'id' });
@@ -914,6 +953,16 @@ export async function removeFromSyncQueue(id: string) {
 export async function clearSyncQueue() {
   const db = await getDB();
   await db.clear('sync_queue');
+}
+
+export async function getSyncMetadata(key: string): Promise<string | undefined> {
+  const db = await getDB();
+  return (await db.get('sync_metadata', key))?.value;
+}
+
+export async function setSyncMetadata(key: string, value: string): Promise<void> {
+  const db = await getDB();
+  await db.put('sync_metadata', { key, value });
 }
 
 // ============ SECURITY STORE OPERATIONS ============
@@ -1426,6 +1475,20 @@ export async function getKCBStatistics(sinceDate?: Date): Promise<KCBStatistics>
   };
 }
 
+// Payment account operations
+export async function savePaymentAccount(account: PaymentAccount): Promise<PaymentAccount> {
+  const db = await getDB();
+  await db.put('payment_accounts', account);
+  const { queueForSync } = await import('./sync');
+  queueForSync('payment_accounts', 'update', account as unknown as Record<string, unknown>);
+  return account;
+}
+
+export async function getAllPaymentAccounts(): Promise<PaymentAccount[]> {
+  const db = await getDB();
+  return db.getAll('payment_accounts');
+}
+
 // Payment method operations
 export async function savePaymentMethod(method: PaymentMethodConfig): Promise<PaymentMethodConfig> {
   const db = await getDB();
@@ -1515,7 +1578,14 @@ export async function getReceiptSettings(): Promise<ReceiptSettings | undefined>
 
 // ============ BACKUP & RESTORE OPERATIONS ============
 
-export interface BackupData {
+  export async function saveCODPayment(payment: POSDatabase['cod_payments']['value']) { const db = await getDB(); await db.put('cod_payments', payment); }
+  export async function getCODPaymentsByTransaction(transactionId: string) { const db = await getDB(); return db.getAllFromIndex('cod_payments', 'by-transaction', transactionId); }
+  export async function saveCODReceipt(receipt: POSDatabase['cod_receipts']['value']) { const db = await getDB(); await db.put('cod_receipts', receipt); }
+  export async function getCODReceiptsByTransaction(transactionId: string) { const db = await getDB(); return db.getAllFromIndex('cod_receipts', 'by-transaction', transactionId); }
+  export async function getAllCODPayments() { const db = await getDB(); return db.getAll('cod_payments'); }
+  export async function getAllCODReceipts() { const db = await getDB(); return db.getAll('cod_receipts'); }
+
+  export interface BackupData {
   version: string;
   exported_at: string;
   exported_by?: string;

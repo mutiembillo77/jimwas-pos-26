@@ -1,6 +1,6 @@
 // Approval Workflow Engine - Handle approval requests for high-risk actions
 
-import { generateId, saveApprovalRequest, getApprovalRequest, getAllApprovalRequests, getApprovalRequestsByStatus, getApprovalRequestsByRequester, saveApprovalHistory, saveVoidRequest, getVoidRequest, saveRefundRequest, getRefundRequest, getVoidRequestsByStatus, getRefundRequestsByStatus } from './db';
+import { generateId, saveApprovalRequest, getApprovalRequest, getAllApprovalRequests, getApprovalRequestsByStatus, getApprovalRequestsByRequester, saveApprovalHistory, saveVoidRequest, getVoidRequest, saveRefundRequest, getRefundRequest, getVoidRequestsByStatus, getRefundRequestsByStatus, getTransaction, getAllProducts, saveProduct, saveTransaction } from './db';
 import { getCurrentUser } from './auth';
 import { canPerformWithoutApproval } from './permissions';
 import { logApprovalRequested, logApprovalApproved, logApprovalRejected, logSaleVoided, logSaleRefunded } from './audit';
@@ -291,6 +291,23 @@ async function executeApprovedAction(request: ApprovalRequest): Promise<void> {
       break;
     // Add more action types as needed
   }
+}
+
+// Execute a void immediately for an authorized Admin/Administrator.
+export async function voidTransactionDirect(transactionId: string, reason: string, userId: string): Promise<{ success: boolean; error?: string }> {
+  const transaction = await getTransaction(transactionId);
+  if (!transaction) return { success: false, error: 'Transaction not found' };
+  if (transaction.status === 'voided') return { success: false, error: 'Transaction is already voided' };
+  if (!reason.trim()) return { success: false, error: 'A reason is required' };
+  const products = await getAllProducts();
+  const productMap = new Map(products.map(product => [product.id, product]));
+  for (const item of transaction.items) {
+    const product = productMap.get(item.product_id);
+    if (product) await saveProduct({ ...product, stock: product.stock + item.quantity, updated_at: new Date().toISOString(), sync_status: 'pending' });
+  }
+  await saveTransaction({ ...transaction, status: 'voided', notes: `Voided: ${reason}`, sync_status: 'pending' });
+  await logSaleVoided(transactionId, reason, userId, transaction);
+  return { success: true };
 }
 
 // Execute void

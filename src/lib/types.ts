@@ -39,6 +39,35 @@ export interface TransactionItem {
   subtotal: number;
 }
 
+export type CODStatus = 'PENDING' | 'CONFIRMED' | 'DISPATCHED' | 'DELIVERED' | 'PARTIALLY_PAID' | 'PAID' | 'CANCELLED' | 'DELIVERY_FAILED' | 'RETURNED';
+
+export interface CODPayment {
+  id: string;
+  transaction_id: string;
+  amount: number;
+  amount_applied: number;
+  change_amount: number;
+  payment_method: string;
+  payment_account_id?: string | null;
+  payment_account_name?: string | null;
+  reference?: string;
+  notes?: string;
+  created_at: string;
+  device_id: string;
+  sync_status: EnterpriseSyncStatus;
+}
+
+export interface CODReceipt {
+  id: string;
+  receipt_number: string;
+  transaction_id: string;
+  payment_id: string;
+  receipt_type: 'cod_order' | 'cod_payment' | 'delivery_note';
+  amount: number;
+  issued_at: string;
+  sync_status: EnterpriseSyncStatus;
+}
+
 export interface Transaction {
   id: string;
   customer_id?: string;
@@ -46,6 +75,8 @@ export interface Transaction {
   amount_paid: number;
   change_amount: number;
   payment_method: string;
+  payment_account_id?: string | null;
+  payment_account_name?: string | null;
   status: string;
   notes?: string;
   created_at: string;
@@ -54,6 +85,12 @@ export interface Transaction {
   sale_type?: SaleType;
   deposit_amount?: number;
   balance_amount?: number;
+  cod_status?: CODStatus;
+  cod_order_id?: string;
+  delivery_address?: string;
+  delivery_contact?: string;
+  consignment_number?: string;
+  cod_payments?: CODPayment[];
 }
 
 export interface InstallmentPlan {
@@ -227,7 +264,9 @@ export interface ReconciliationRecord {
   sync_status: EnterpriseSyncStatus;
 }
 
-export type OutboundDeliveryStatus = 'pending' | 'packed' | 'assigned' | 'dispatched' | 'in_transit' | 'delivered' | 'closed' | 'returned';
+export type OutboundDeliveryStatus = 'pending' | 'packed' | 'assigned' | 'dispatched' | 'in_transit' | 'delivered' | 'closed' | 'returned' | 'failed' | 'cancelled';
+export type DeliveryFeeStatus = 'unpaid' | 'partial' | 'paid' | 'waived';
+export type DeliveryPaymentMethod = 'cash' | 'mpesa' | 'card' | 'bank' | 'credit';
 
 export interface OutboundDelivery {
   id: string;
@@ -235,14 +274,28 @@ export interface OutboundDelivery {
   customer_id?: string;
   status: OutboundDeliveryStatus;
   address?: string;
+  recipient_name?: string;
+  recipient_phone?: string;
+  delivery_instructions?: string;
   courier?: string;
   driver?: string;
   vehicle?: string;
   eta?: string;
+  scheduled_at?: string;
+  dispatched_at?: string;
+  delivered_at?: string;
+  delivery_fee?: number;
+  delivery_fee_paid?: number;
+  delivery_fee_status?: DeliveryFeeStatus;
+  delivery_payment_method?: DeliveryPaymentMethod;
+  delivery_payment_reference?: string;
   cod_amount?: number;
+  cod_collected?: number;
   cod_status?: 'pending' | 'collected' | 'failed' | 'not_applicable';
   proof_type?: 'signature' | 'photo' | 'otp' | 'qr';
   proof_reference?: string;
+  exception_reason?: string;
+  notes?: string;
   created_at: string;
   updated_at: string;
   sync_status: EnterpriseSyncStatus;

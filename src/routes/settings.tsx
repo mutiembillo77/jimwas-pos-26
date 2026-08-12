@@ -306,7 +306,7 @@ export function SettingsPage() {
         )}
 
         {activeTab === 'users' && (
-          <RoleGuard allowedRoles={['admin']}>
+<RoleGuard allowedRoles={['admin', 'administrator']}>
             <UsersTab
               users={users}
               currentUser={user}
@@ -521,6 +521,7 @@ function UsersTab({
   const getRoleColor = (role: string) => {
     switch (role) {
       case 'admin': return 'bg-red-900/30 text-red-400';
+      case 'administrator': return 'bg-purple-900/30 text-purple-400';
       case 'manager': return 'bg-amber-900/30 text-amber-400';
       case 'cashier': return 'bg-blue-900/30 text-blue-400';
       default: return 'bg-slate-700 text-slate-400';
@@ -1367,7 +1368,7 @@ function UserModal({
           formData.email,
           formData.password,
           formData.full_name,
-          formData.role_code as 'admin' | 'manager' | 'cashier',
+          formData.role_code as RoleCode,
           currentUserId!
         );
 
@@ -1457,7 +1458,8 @@ function UserModal({
             >
               <option value="cashier">Cashier</option>
               <option value="manager">Manager</option>
-              <option value="admin">Administrator</option>
+              <option value="administrator">Admin</option>
+  <option value="admin">System Administrator</option>
             </select>
           </div>
 

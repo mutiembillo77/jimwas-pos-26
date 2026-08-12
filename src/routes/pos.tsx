@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, Minus, Trash2, Search, User, ShoppingCart, Banknote, CreditCard, Smartphone, X, Package, Archive, ArchiveRestore, Loader2, CheckCircle2, XCircle, AlertCircle, Clock, FlaskConical, Zap, Printer } from 'lucide-react';
-import { generateId, saveProduct, getAllProducts, getAllCustomers, saveCustomer, getKCBSettings, getBusinessSettings, getReceiptSettings, getTransaction } from '../lib/db';
+import { Plus, Minus, Trash2, Search, User, ShoppingCart, Banknote, Smartphone, X, Package, Archive, ArchiveRestore, Loader2, CheckCircle2, XCircle, AlertCircle, Clock, FlaskConical, Zap, Printer, Truck } from 'lucide-react';
+import { generateId, saveProduct, getAllProducts, getAllCustomers, saveCustomer, getKCBSettings, getBusinessSettings, getReceiptSettings, getTransaction, getAllPaymentAccounts } from '../lib/db';
 import { syncInsertCustomer, syncInsertProduct, getSupabase } from '../lib/sync';
 import { logSaleCompleted, logCustomerCreated } from '../lib/audit';
 import { useAuth } from '../context/AuthContext';
@@ -10,7 +10,9 @@ import { completeSale, validatePhoneNumber, validatePrice, validateStock, saniti
 import { printReceipt, saveReceiptToHistory, getReceiptHistory } from '../lib/print';
 import { useDebounce } from '../hooks/useDebounce';
 import { SaleTypeSelector } from '../components/SaleTypeSelector';
-import type { Product, Customer, CartItem, SaleType } from '../lib/types';
+  import { createDelivery } from '../lib/enterprise';
+  import type { Product, Customer, CartItem, SaleType } from '../lib/types';
+import type { PaymentAccount } from '../lib/settings-types';
 
 const LOYALTY_POINTS_PER_SHILLING = 100;
 
@@ -23,7 +25,7 @@ function formatPhoneNumber(phone: string): string {
   return cleaned;
 }
 
-const POSTerminal = () => {
+const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transactionId: string) => void }) => {
   const { user } = useAuth();
   const toast = useToast();
   const [products, setProducts] = useState<Product[]>([]);
@@ -32,7 +34,12 @@ const POSTerminal = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [customerSearch, setCustomerSearch] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'kcb'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'cod' | 'kcb'>('cash');
+  const [deliveryFeeType, setDeliveryFeeType] = useState<'none' | 'optional' | 'from_cbd'>('none');
+  const deliveryFee = deliveryFeeType === 'optional' ? 100 : deliveryFeeType === 'from_cbd' ? 300 : 0;
+  const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
+  const [paymentAccountId, setPaymentAccountId] = useState<string | null>(null);
+  const selectedPaymentAccount = paymentAccounts.find((account) => account.id === paymentAccountId) ?? null;
   const [amountPaid, setAmountPaid] = useState('');
   const [showCheckout, setShowCheckout] = useState(false);
   const [showNewCustomer, setShowNewCustomer] = useState(false);
@@ -96,13 +103,17 @@ const POSTerminal = () => {
   }, [kcbStatus, kcbStartTime]);
 
   const loadData = async () => {
-    const [prods, custs, idbMpesa] = await Promise.all([
+    const [prods, custs, idbMpesa, accounts] = await Promise.all([
       getAllProducts(),
       getAllCustomers(),
       getKCBSettings(),
+      getAllPaymentAccounts(),
     ]);
     setProducts(prods.filter(p => p.is_active));
     setCustomers(custs);
+    setPaymentAccounts(accounts);
+    
+    if (accounts.length > 0 && !paymentAccountId) setPaymentAccountId(accounts[0].id);
 
     // Always try Supabase first for KCB settings (authoritative source)
     let kcbSettings = idbMpesa;
@@ -192,9 +203,8 @@ const POSTerminal = () => {
     );
   }, [customers, debouncedCustomerSearch]);
 
-  const cartTotal = useMemo(() => {
-    return cart.reduce((sum, item) => sum + item.subtotal, 0);
-  }, [cart]);
+  const productTotal = useMemo(() => cart.reduce((sum, item) => sum + item.subtotal, 0), [cart]);
+  const cartTotal = productTotal + deliveryFee;
 
   const change = useMemo(() => {
     const paid = parseFloat(amountPaid) || 0;
@@ -348,9 +358,11 @@ const POSTerminal = () => {
       paymentMethod: 'kcb',
       amountPaid: cartTotal,
       change: 0,
-      userId: user?.id || 'system',
-      mpesaReceipt,
-    });
+  userId: user?.id || 'system',
+  mpesaReceipt,
+  paymentAccountId,
+  paymentAccountName: paymentAccounts.find((account) => account.id === paymentAccountId)?.name ?? null,
+  });
 
     if (result.success) {
       await logSaleCompleted(result.transactionId, { cart, total_amount: cartTotal }, user?.id);
@@ -483,8 +495,8 @@ const POSTerminal = () => {
     }
 
     // Calculate amount paid based on sale type
-    let paid = parseFloat(amountPaid) || cartTotal;
-    let amountRequired = cartTotal;
+    let paid = paymentMethod === 'cod' ? 0 : (parseFloat(amountPaid) || cartTotal);
+    let amountRequired = paymentMethod === 'cod' ? 0 : cartTotal;
     
     // For Lipa Mdogo and Kyama, only deposit is required today
     if (saleType === 'lipa_mdogo' || saleType === 'kyama') {
@@ -508,14 +520,31 @@ const POSTerminal = () => {
       paymentMethod,
       amountPaid: paid,
       change: (saleType === 'lipa_mdogo' || saleType === 'kyama') ? 0 : change,
-      userId: user?.id || 'system',
-      saleType,
+  userId: user?.id || 'system',
+  paymentAccountId,
+  paymentAccountName: paymentAccounts.find((account) => account.id === paymentAccountId)?.name ?? null,
+  saleType,
       depositAmount: (saleType === 'lipa_mdogo' || saleType === 'kyama') ? depositAmount : 0,
       balanceAmount: (saleType === 'lipa_mdogo' || saleType === 'kyama') ? (cartTotal - depositAmount) : 0,
     });
 
     if (result.success) {
-      await logSaleCompleted(result.transactionId, { cart, total_amount: cartTotal }, user?.id);
+      await logSaleCompleted(result.transactionId, { cart, total_amount: cartTotal, product_total: productTotal, delivery_fee: deliveryFee }, user?.id);
+      if (paymentMethod === 'cod') {
+        await createDelivery(result.transactionId, {
+          customer_id: selectedCustomer?.id,
+          delivery_fee: deliveryFee,
+          delivery_fee_paid: deliveryFee,
+          delivery_fee_status: deliveryFee > 0 ? 'paid' : 'waived',
+          delivery_payment_method: deliveryFee > 0 ? 'cash' : undefined,
+          cod_amount: cartTotal,
+          cod_collected: 0,
+          cod_status: 'pending',
+          status: 'pending',
+          notes: `Delivery fee: ${deliveryFeeType === 'optional' ? 'Optional/Others Delivery Fee (CBD)' : deliveryFeeType === 'from_cbd' ? 'Delivery from CBD' : 'No delivery fee'}`,
+        });
+        onDeliveryRequested?.(result.transactionId);
+      }
       
       // Automatically print receipt after successful sale
       try {
@@ -561,7 +590,7 @@ const POSTerminal = () => {
       await loadData();
       toast.show('Transaction completed successfully!');
     }
-  }, [cart, cartTotal, products, selectedCustomer, paymentMethod, amountPaid, change, user?.id, toast]);
+  }, [cart, cartTotal, productTotal, deliveryFee, deliveryFeeType, products, selectedCustomer, paymentMethod, amountPaid, change, user?.id, toast, onDeliveryRequested, paymentAccounts, paymentAccountId, saleType, depositAmount, kcbReceiptNumber]);
 
   return (
     <div className="grid grid-cols-3 gap-6 h-full">
@@ -854,7 +883,7 @@ const POSTerminal = () => {
                 <div className="grid grid-cols-3 gap-2">
                   {[
                     { id: 'cash', icon: Banknote, label: 'Cash' },
-                    { id: 'card', icon: CreditCard, label: 'Card' },
+                    { id: 'cod', icon: Truck, label: 'C.O.D.' },
                     { id: 'kcb', icon: Smartphone, label: 'KCB STK' },
                   ].map(({ id, icon: Icon, label }) => {
                     const isLocked = kcbStatus === 'waiting' || kcbStatus === 'initiating';
@@ -862,7 +891,7 @@ const POSTerminal = () => {
                     return (
                       <button
                         key={id}
-                        onClick={() => setPaymentMethod(id as 'cash' | 'card' | 'kcb')}
+                        onClick={() => setPaymentMethod(id as 'cash' | 'cod' | 'kcb')}
                         disabled={isLocked}
                         className={`p-3 rounded-lg border-2 flex flex-col items-center gap-1 transition relative ${
                           paymentMethod === id
@@ -883,6 +912,18 @@ const POSTerminal = () => {
                     );
                   })}
                 </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-700 bg-slate-700/50 p-4">
+                <label className="mb-2 block text-sm text-slate-300">Delivery fee (tracked separately)</label>
+                <select value={deliveryFeeType} onChange={(event) => setDeliveryFeeType(event.target.value as typeof deliveryFeeType)} className="w-full rounded-lg border border-slate-600 bg-slate-600 px-3 py-2 text-white">
+                  <option value="none">No delivery fee</option>
+                  <option value="optional">Optional/Others Delivery Fee — KES 100</option>
+                  <option value="from_cbd">Delivery from CBD — KES 300</option>
+                </select>
+                <div className="mt-3 flex justify-between text-sm"><span className="text-slate-400">Products</span><span className="text-white">KES {productTotal.toLocaleString()}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-slate-400">Delivery fee</span><span className="text-amber-300">KES {deliveryFee.toLocaleString()}</span></div>
+                <div className="mt-2 flex justify-between border-t border-slate-600 pt-2 font-semibold"><span className="text-slate-200">Total</span><span className="text-emerald-300">KES {cartTotal.toLocaleString()}</span></div>
               </div>
 
               {/* KCB BUNI STK Push Section */}
@@ -1141,20 +1182,33 @@ const POSTerminal = () => {
                 </div>
               )}
 
-              {/* Cash/Card Payment Section */}
+              {/* Cash/C.O.D. Payment Section */}
               {paymentMethod !== 'kcb' && (
                 <>
-                  {/* Amount Paid */}
+                  {paymentAccounts.length > 0 && (
+    <div className="mt-4">
+      <label className="mb-2 block text-sm text-slate-400">Payment Account</label>
+      <select value={paymentAccountId ?? ''} onChange={(event) => setPaymentAccountId(event.target.value || null)} className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-white">
+        <option value="">No linked account</option>
+        {paymentAccounts.filter((account) => account.status === 'ACTIVE').map((account) => <option key={account.id} value={account.id}>{account.name} — PayBill {account.paybill_number ?? '—'} / A/C {account.account_number ?? account.account_number_masked ?? '—'}</option>)}
+      </select>
+      <p className="mt-1 text-xs text-slate-500">Applies to every payment method. PayBill and account details are recorded with the sale.</p>
+      {selectedPaymentAccount && <p className="mt-2 rounded-md bg-slate-800 px-3 py-2 text-xs text-emerald-300">PayBill {selectedPaymentAccount.paybill_number} · A/C {selectedPaymentAccount.account_number}</p>}
+    </div>
+  )}
+
+  {/* Amount Paid */}
                   <div>
                     <label className="text-sm text-slate-400 block mb-2">
-                      {saleType === 'lipa_mdogo' || saleType === 'kyama' 
+                      {paymentMethod === 'cod' ? 'Amount Paid (KES) — collected on delivery' : saleType === 'lipa_mdogo' || saleType === 'kyama' 
                         ? 'Deposit Amount (KES)' 
                         : 'Amount Paid (KES)'}
                     </label>
                     <input
                       type="number"
-                      value={amountPaid}
+                      value={paymentMethod === 'cod' ? '0' : amountPaid}
                       onChange={(e) => setAmountPaid(e.target.value)}
+                      disabled={paymentMethod === 'cod'}
                       placeholder={(saleType === 'lipa_mdogo' || saleType === 'kyama' 
                         ? depositAmount 
                         : cartTotal).toString()}

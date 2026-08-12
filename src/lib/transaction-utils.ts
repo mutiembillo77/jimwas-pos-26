@@ -12,11 +12,13 @@ export interface CompleteSaleParams {
   cartTotal: number;
   products: Product[];
   selectedCustomer: Customer | null;
-  paymentMethod: 'cash' | 'card' | 'mpesa';
+  paymentMethod: 'cash' | 'card' | 'cod' | 'mpesa';
   amountPaid: number;
   change: number;
   userId: string;
   mpesaReceipt?: string;
+  paymentAccountId?: string | null;
+  paymentAccountName?: string | null;
   saleType?: SaleType;
   depositAmount?: number;
   balanceAmount?: number;
@@ -38,6 +40,8 @@ export async function completeSale({
   change,
   userId,
   mpesaReceipt,
+  paymentAccountId = null,
+  paymentAccountName = null,
   saleType = 'standard',
   depositAmount = 0,
   balanceAmount = 0,
@@ -65,17 +69,21 @@ export async function completeSale({
     id: generateId(),
     customer_id: selectedCustomer?.id,
     total_amount: cartTotal,
-    amount_paid: amountPaid,
-    change_amount: change,
+    amount_paid: method === 'cod' ? 0 : amountPaid,
+    change_amount: method === 'cod' ? 0 : change,
     payment_method: method,
-    status: 'completed' as const,
+    payment_account_id: paymentAccountId,
+    payment_account_name: paymentAccountName,
+    status: method === 'cod' ? 'pending' as const : 'completed' as const,
     created_at: now,
     sync_status: 'pending' as const,
     items,
     sale_type: saleType,
     deposit_amount: depositAmount,
-    balance_amount: balanceAmount,
+    balance_amount: method === 'cod' ? cartTotal : balanceAmount,
+    cod_status: method === 'cod' ? 'PENDING' as const : undefined,
   };
+  if (method === 'cod' && !selectedCustomer?.phone) throw new Error('COD orders require a customer phone number.');
 
   // Save transaction locally and queue for sync
   await saveTransaction(transaction);

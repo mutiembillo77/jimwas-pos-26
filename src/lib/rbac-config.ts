@@ -32,7 +32,7 @@ export const ROUTE_CONFIG: Record<string, RouteConfig> = {
   // Core POS
   'pos': {
     path: '/pos',
-    allowedRoles: ['admin', 'manager', 'cashier'],
+    allowedRoles: ['admin', 'administrator', 'manager', 'cashier'],
     permissions: ['sales.create', 'sales.view'],
     description: 'POS Terminal - Create and process sales',
   },
@@ -40,7 +40,7 @@ export const ROUTE_CONFIG: Record<string, RouteConfig> = {
   // Customers
   'customers': {
     path: '/customers',
-    allowedRoles: ['admin', 'manager', 'cashier'],
+    allowedRoles: ['admin', 'administrator', 'manager', 'cashier'],
     permissions: ['customers.view'],
     description: 'Customer Management',
   },
@@ -78,7 +78,7 @@ export const ROUTE_CONFIG: Record<string, RouteConfig> = {
   // Enterprise operations
   'reports': {
     path: '/reports',
-    allowedRoles: ['admin', 'manager', 'cashier'],
+    allowedRoles: ['admin', 'administrator', 'manager', 'cashier'],
     permissions: ['reports.view'],
     description: 'Sales, inventory, financial, delivery, user, and X-Y-Z reports',
   },
@@ -90,13 +90,13 @@ export const ROUTE_CONFIG: Record<string, RouteConfig> = {
   },
   'outbound-deliveries': {
     path: '/outbound-deliveries',
-    allowedRoles: ['admin', 'manager', 'cashier'],
+    allowedRoles: ['admin', 'administrator', 'manager', 'cashier'],
     permissions: ['sales.view'],
     description: 'Outbound customer delivery tracking',
   },
   'shifts': {
     path: '/shifts',
-    allowedRoles: ['admin', 'manager', 'cashier'],
+    allowedRoles: ['admin', 'administrator', 'manager', 'cashier'],
     permissions: ['sales.view'],
     description: 'Shift opening, X-Y-Z reports, and closeout',
   },
@@ -110,7 +110,7 @@ export const ROUTE_CONFIG: Record<string, RouteConfig> = {
   // Transactions
   'transactions': {
     path: '/transactions',
-    allowedRoles: ['admin', 'manager', 'cashier'],
+    allowedRoles: ['admin', 'administrator', 'manager', 'cashier'],
     permissions: ['sales.view', 'reports.view'],
     description: 'Transaction History & Analytics',
   },
@@ -166,15 +166,15 @@ export const FEATURE_CONFIG: Record<string, FeatureConfig> = {
   'CREATE_SALE': {
     featureName: 'Create Sale',
     requiredPermissions: ['sales.create'],
-    allowedRoles: ['admin', 'manager', 'cashier'],
+    allowedRoles: ['admin', 'administrator', 'manager', 'cashier'],
     description: 'Create new sales transactions',
   },
 
   'VOID_SALE': {
     featureName: 'Void Sale',
     requiredPermissions: ['sales.void'],
-    allowedRoles: ['admin', 'manager'],
-    description: 'Void completed sales',
+    allowedRoles: ['admin', 'administrator', 'manager'],
+    description: 'Void completed sales directly or through approval',
   },
 
   'REFUND_SALE': {
@@ -255,7 +255,7 @@ export const FEATURE_CONFIG: Record<string, FeatureConfig> = {
   'VIEW_REPORTS': {
     featureName: 'View Reports',
     requiredPermissions: ['reports.view'],
-    allowedRoles: ['admin', 'manager', 'cashier'],
+    allowedRoles: ['admin', 'administrator', 'manager', 'cashier'],
     description: 'View reports',
   },
 
@@ -295,14 +295,14 @@ export const COMPONENT_CONFIG: Record<string, ComponentConfig> = {
   // Navigation Components
   'POSNavItem': {
     componentName: 'POS Navigation',
-    allowedRoles: ['admin', 'manager', 'cashier'],
+    allowedRoles: ['admin', 'administrator', 'manager', 'cashier'],
     requiredPermissions: ['sales.view'],
     description: 'Show POS in navigation',
   },
 
   'CustomerNavItem': {
     componentName: 'Customers Navigation',
-    allowedRoles: ['admin', 'manager', 'cashier'],
+    allowedRoles: ['admin', 'administrator', 'manager', 'cashier'],
     requiredPermissions: ['customers.view'],
     description: 'Show Customers in navigation',
   },
@@ -330,7 +330,7 @@ export const COMPONENT_CONFIG: Record<string, ComponentConfig> = {
 
   'TransactionsNavItem': {
     componentName: 'Transactions Navigation',
-    allowedRoles: ['admin', 'manager', 'cashier'],
+    allowedRoles: ['admin', 'administrator', 'manager', 'cashier'],
     requiredPermissions: ['sales.view'],
     description: 'Show Transactions in navigation',
   },
