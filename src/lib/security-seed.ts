@@ -17,7 +17,18 @@ export async function isSecurityInitialized(): Promise<boolean> {
   return roles.length > 0;
 }
 
-export async function initializeSecurityData(): Promise<void> {
+let securityInitializationPromise: Promise<void> | null = null;
+
+export function initializeSecurityData(): Promise<void> {
+  if (securityInitializationPromise) return securityInitializationPromise;
+  securityInitializationPromise = initializeSecurityDataOnce().catch((error) => {
+    securityInitializationPromise = null;
+    throw error;
+  });
+  return securityInitializationPromise;
+}
+
+async function initializeSecurityDataOnce(): Promise<void> {
   console.log('Checking security initialization...');
 
   const db = await getDB();
