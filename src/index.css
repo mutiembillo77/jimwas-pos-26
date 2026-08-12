@@ -65,6 +65,17 @@
 }
 
 /* Smooth scrolling for keyboard navigation */
+@media print {
+  body { background: white !important; color: #172033 !important; }
+  body > * { display: none !important; }
+  body::after { content: 'JIMWAS ENTERPRISES · Official Delivery Note'; display: block; margin: 12mm; white-space: pre-wrap; font: 10pt Arial, sans-serif; color: #172033; }
+  .delivery-note-print { display: block !important; position: fixed; inset: 0; padding: 14mm; background: white; color: #172033; }
+  .delivery-note-print table { width: 100%; border-collapse: collapse; }
+  .delivery-note-print th, .delivery-note-print td { border: 1px solid #cbd5e1; padding: 7px; text-align: left; }
+  .delivery-note-print th { background: #e2e8f0; }
+}
+.delivery-note-print { display: none; }
+
 @layer utilities {
   .scroll-smooth-keyboard {
     scroll-behavior: smooth;
