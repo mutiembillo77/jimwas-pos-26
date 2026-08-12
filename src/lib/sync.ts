@@ -305,9 +305,12 @@ async function syncTableFromRemote(client: SupabaseClient, db: Awaited<ReturnTyp
     return;
   }
 
+  const seenUniqueValues = new Set<unknown>();
   for (const row of data) {
     if (config.uniqueIndex && config.uniqueField) {
       const fieldValue = row[config.uniqueField];
+      if (fieldValue && seenUniqueValues.has(fieldValue)) continue;
+      if (fieldValue) seenUniqueValues.add(fieldValue);
       if (fieldValue) {
         const existing = await db.getFromIndex(config.store, config.uniqueIndex, fieldValue);
         if (existing && existing.id !== row.id) {
