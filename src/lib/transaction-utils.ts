@@ -83,7 +83,8 @@ export async function completeSale({
     balance_amount: method === 'cod' ? cartTotal : balanceAmount,
     cod_status: method === 'cod' ? 'PENDING' as const : undefined,
   };
-  if (method === 'cod' && !selectedCustomer?.phone) throw new Error('COD orders require a customer phone number.');
+  // COD orders may be created for walk-in customers or customers without a phone.
+  // Delivery contact details can be added later from Delivery Management.
 
   // Save transaction locally and queue for sync
   await saveTransaction(transaction);
