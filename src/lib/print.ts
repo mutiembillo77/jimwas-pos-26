@@ -1,6 +1,6 @@
 import { BusinessSettings, ReceiptSettings } from './settings-types';
 
-interface PrintTransaction {
+export interface PrintTransaction {
   id: string;
   items: Array<{
     product_name: string;
@@ -12,11 +12,48 @@ interface PrintTransaction {
   amount_paid: number;
   change_amount: number;
   payment_method: string;
+  payment_account_id?: string | null;
+  payment_account_name?: string | null;
+  payment_account_paybill?: string | null;
+  payment_account_number?: string | null;
   created_at: string;
   customer_name?: string;
   customer_phone?: string;
   cashier_name?: string;
   mpesa_receipt?: string;
+}
+
+export function resolvePaymentAccountDetails(transaction: {
+  payment_account_id?: string | null;
+  payment_account_name?: string | null;
+  payment_account_paybill?: string | null;
+  payment_account_number?: string | null;
+  payment_method?: string;
+}) {
+  let paybill = transaction.payment_account_paybill || null;
+  let accountNumber = transaction.payment_account_number || null;
+  let name = transaction.payment_account_name || null;
+
+  if (!paybill || !accountNumber) {
+    const id = transaction.payment_account_id;
+    const nameStr = (transaction.payment_account_name || '').toLowerCase();
+
+    if (id === 'payment-account-kcb' || nameStr.includes('kcb') || nameStr.includes('7941675')) {
+      if (!paybill) paybill = '522522';
+      if (!accountNumber) accountNumber = '7941675';
+      if (!name) name = 'KCB A/C 7941675';
+    } else if (id === 'payment-account-ncba' || nameStr.includes('ncba') || nameStr.includes('166294')) {
+      if (!paybill) paybill = '880100';
+      if (!accountNumber) accountNumber = '166294';
+      if (!name) name = 'NCBA A/C 166294';
+    } else if (transaction.payment_method === 'kcb' || transaction.payment_method === 'mpesa') {
+      if (!paybill) paybill = '522522';
+      if (!accountNumber) accountNumber = '7941675';
+      if (!name) name = 'KCB A/C 7941675';
+    }
+  }
+
+  return { name, paybill, accountNumber };
 }
 
 interface PrintOptions {
@@ -83,6 +120,14 @@ function buildReceiptHtml(options: PrintOptions): string {
   lines.push(formatLine('PAID:', `KES ${transaction.amount_paid.toLocaleString()}`));
   lines.push(formatLine('CHANGE:', `KES ${transaction.change_amount.toLocaleString()}`));
   lines.push(formatLine('Method:', transaction.payment_method.toUpperCase()));
+
+  const accountInfo = resolvePaymentAccountDetails(transaction);
+  if (accountInfo.paybill) {
+    lines.push(formatLine('Paybill No.:', accountInfo.paybill));
+  }
+  if (accountInfo.accountNumber) {
+    lines.push(formatLine('A/C No.:', accountInfo.accountNumber));
+  }
 
   if (transaction.mpesa_receipt) {
     lines.push(formatLine('KCB BUNI STK Ref:', transaction.mpesa_receipt));

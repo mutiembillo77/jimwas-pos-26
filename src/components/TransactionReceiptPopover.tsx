@@ -1,6 +1,7 @@
 import React from 'react';
 import { Receipt, Calendar, User, CreditCard, ShoppingBag, CheckCircle2, ShieldAlert, Sparkles, Hash, Phone } from 'lucide-react';
 import type { Transaction, Customer } from '../lib/types';
+import { resolvePaymentAccountDetails } from '../lib/print';
 
 interface TransactionReceiptPopoverProps {
   transaction: Transaction;
@@ -9,6 +10,7 @@ interface TransactionReceiptPopoverProps {
 }
 
 export function TransactionReceiptPopover({ transaction, customer, position }: TransactionReceiptPopoverProps) {
+  const accountDetails = resolvePaymentAccountDetails(transaction);
   // Determine positioning style
   const style: React.CSSProperties = position
     ? {
@@ -173,13 +175,27 @@ export function TransactionReceiptPopover({ transaction, customer, position }: T
             <span className="text-amber-400 font-mono">KES {transaction.change_amount.toLocaleString()}</span>
           </div>
         )}
-        <div className="pt-1.5 flex justify-between items-center border-t border-slate-700/50">
-          <span className="text-[11px] text-slate-400 flex items-center gap-1">
-            <CreditCard size={12} className="text-slate-400" /> Payment Method:
-          </span>
-          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${getPaymentBadgeColor(transaction.payment_method)} uppercase`}>
-            {transaction.payment_method}
-          </span>
+        <div className="pt-1.5 space-y-1 border-t border-slate-700/50">
+          <div className="flex justify-between items-center">
+            <span className="text-[11px] text-slate-400 flex items-center gap-1">
+              <CreditCard size={12} className="text-slate-400" /> Payment Method:
+            </span>
+            <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${getPaymentBadgeColor(transaction.payment_method)} uppercase`}>
+              {transaction.payment_method}
+            </span>
+          </div>
+          {accountDetails.paybill && (
+            <div className="flex justify-between items-center text-[11px] text-slate-400">
+              <span>Paybill No.:</span>
+              <span className="text-slate-200 font-mono font-medium">{accountDetails.paybill}</span>
+            </div>
+          )}
+          {accountDetails.accountNumber && (
+            <div className="flex justify-between items-center text-[11px] text-slate-400">
+              <span>A/C No.:</span>
+              <span className="text-slate-200 font-mono font-medium">{accountDetails.accountNumber}</span>
+            </div>
+          )}
         </div>
       </div>
 

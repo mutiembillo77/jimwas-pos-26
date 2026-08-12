@@ -77,6 +77,8 @@ export interface Transaction {
   payment_method: string;
   payment_account_id?: string | null;
   payment_account_name?: string | null;
+  payment_account_paybill?: string | null;
+  payment_account_number?: string | null;
   status: string;
   notes?: string;
   created_at: string;
