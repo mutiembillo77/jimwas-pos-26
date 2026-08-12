@@ -61,7 +61,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    init();
+    void init();
+    const loadingFallback = window.setTimeout(() => {
+      console.warn('[v0] Auth initialization exceeded the preview startup budget; showing login.');
+      setIsLoading(false);
+    }, 6000);
+    return () => window.clearTimeout(loadingFallback);
   }, []);
 
   const login = async (username: string, password: string) => {

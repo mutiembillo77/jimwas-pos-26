@@ -12,6 +12,10 @@ interface PrintTransaction {
   amount_paid: number;
   change_amount: number;
   payment_method: string;
+  payment_account_id?: string | null;
+  payment_account_name?: string | null;
+  payment_account_number?: string | null;
+  payment_account_paybill?: string | null;
   created_at: string;
   customer_name?: string;
   customer_phone?: string;
@@ -95,6 +99,12 @@ function buildReceiptHtml(options: PrintOptions): string {
   lines.push(formatLine('PAID:', `KES ${transaction.amount_paid.toLocaleString()}`));
   lines.push(formatLine('CHANGE:', `KES ${transaction.change_amount.toLocaleString()}`));
   lines.push(formatLine('Method:', transaction.payment_method.toUpperCase()));
+  const accountLabel = transaction.payment_account_name || (transaction.payment_method.toLowerCase() === 'cash' ? 'CASH' : transaction.payment_method.toLowerCase() === 'kcb' ? 'KCB' : transaction.payment_method.toLowerCase() === 'ncba' ? 'NCBA' : 'Unassigned');
+  lines.push(formatLine('Account:', accountLabel));
+  if (transaction.payment_account_paybill || transaction.payment_account_number) {
+    if (transaction.payment_account_paybill) lines.push(formatLine('PayBill:', transaction.payment_account_paybill));
+    if (transaction.payment_account_number) lines.push(formatLine('A/C No.:', transaction.payment_account_number));
+  }
 
   if (transaction.mpesa_receipt) {
     lines.push(formatLine('KCB BUNI STK Ref:', transaction.mpesa_receipt));
