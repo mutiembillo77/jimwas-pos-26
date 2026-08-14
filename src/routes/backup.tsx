@@ -504,14 +504,14 @@ export function BackupPage() {
             <Database size={20} className="text-slate-400" />
             Data Management
           </h2>
-          <div className="bg-amber-900/20 border border-amber-700 rounded-lg p-4 mb-4">
-            <div className="flex items-center gap-2 text-amber-400 mb-2">
-              <AlertTriangle size={16} />
-              <span className="font-medium">Offline Storage</span>
+          <div className={`rounded-lg border p-4 mb-4 ${syncState.status === 'synced' ? 'bg-emerald-900/20 border-emerald-700' : syncState.status === 'offline' ? 'bg-amber-900/20 border-amber-700' : 'bg-red-900/20 border-red-700'}`}>
+            <div className={`flex items-center gap-2 mb-2 ${syncState.status === 'synced' ? 'text-emerald-400' : syncState.status === 'offline' ? 'text-amber-400' : 'text-red-400'}`}>
+              {syncState.status === 'synced' ? <Check size={16} /> : <AlertTriangle size={16} />}
+              <span className="font-medium">{syncState.status === 'synced' ? 'Cloud Sync Active' : syncState.status === 'offline' ? 'Offline Storage' : 'Cloud Sync Needs Attention'}</span>
             </div>
             <p className="text-xs text-slate-300">
-              Your data is stored locally in your browser. Regular backups are recommended.
-              Clearing browser data will remove all offline data.
+              {syncState.status === 'synced' ? 'Your local POS data is backed up through the cloud sync connection.' : syncState.error || 'Your data is stored locally in your browser. Regular backups are recommended.'}
+              {' '}Clearing browser data will remove all offline data.
             </p>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
