@@ -86,12 +86,15 @@ export async function retrySyncItem(id: string): Promise<{ success: boolean; mes
     await processSyncItem(item);
     await removeFromSyncQueue(item.id);
     await checkPendingCount();
+    syncState.error = null;
+    syncState.status = syncState.pendingCount === 0 ? 'synced' : 'pending';
+    notifySyncState();
     return { success: true, message: 'Item synced successfully' };
   } catch (error) {
     await addToSyncQueue({ ...item, operation: item.operation as 'insert' | 'update' | 'delete', retry_count: (item.retry_count ?? 0) + 1, next_retry_at: undefined, last_error: error instanceof Error ? error.message : 'Sync failed' } as any);
-    syncState.failedCount += 1;
+    syncState.failedCount = (await getSyncQueueItems()).filter((entry) => (entry.retry_count ?? 0) > 0).length;
     syncState.status = 'degraded';
-    syncState.error = error instanceof Error ? error.message : 'Sync failed';
+    syncState.error = error instanceof Error ? `${item.table_name}: ${error.message}` : `Failed to sync ${item.table_name}`;
     notifySyncState();
     return { success: false, message: syncState.error };
   }
@@ -134,6 +137,11 @@ async function checkPendingCount() {
   try {
     const queue = await getSyncQueue();
     syncState.pendingCount = queue.length;
+    syncState.failedCount = queue.filter((item) => (item.retry_count ?? 0) > 0).length;
+    if (queue.length === 0 && isOnline && getSupabase()) {
+      syncState.status = 'synced';
+      syncState.error = null;
+    }
     notifySyncState();
   } catch (error) {
     console.error('Failed to check pending count:', error);
@@ -223,7 +231,7 @@ async function processSyncItem(item: { table_name: string; operation: string; da
       break;
     }
     case 'update': {
-      const result = await table.upsert(data);
+      const result = await table.upsert(data, { onConflict: 'id', ignoreDuplicates: false });
       error = result.error;
       break;
     }
