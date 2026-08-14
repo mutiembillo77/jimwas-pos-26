@@ -2,7 +2,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { getDB, getSyncQueue, removeFromSyncQueue, addToSyncQueue, generateId, getSyncMetadata, setSyncMetadata } from './db';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? import.meta.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 let _supabase: SupabaseClient | null = null;
 
@@ -147,8 +147,8 @@ export function getOnlineStatus(): boolean {
 async function triggerSync() {
   if (!isOnline || isSyncing) return;
   if (!getSupabase()) {
-    syncState.status = 'offline';
-    syncState.error = 'Supabase is not configured. Local operations remain enabled.';
+    syncState.status = isOnline ? 'error' : 'offline';
+    syncState.error = isOnline ? 'Supabase configuration is unavailable. Local operations remain enabled.' : 'Browser is offline. Local operations remain enabled.';
     notifySyncState();
     return;
   }
