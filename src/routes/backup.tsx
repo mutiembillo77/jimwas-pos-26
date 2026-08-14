@@ -174,7 +174,7 @@ export function BackupPage() {
           <div className={`rounded-lg p-4 ${
             resyncResult.errors.length === 0
               ? 'bg-emerald-900/20 border border-emerald-700'
-              : 'bg-amber-900/20 border border-amber-700'
+              : 'bg-red-900/20 border border-red-700'
           }`}>
             <div className="grid grid-cols-3 gap-4 text-center mb-2">
               <div>
@@ -191,9 +191,9 @@ export function BackupPage() {
               </div>
             </div>
             {resyncResult.errors.length > 0 && (
-              <div className="text-xs text-red-400 mt-2">
-                {resyncResult.errors.slice(0, 3).join('\n')}
-                {resyncResult.errors.length > 3 && `\n... +${resyncResult.errors.length - 3} more`}
+              <div className="mt-2 max-h-24 overflow-y-auto space-y-1 text-xs text-red-300" role="alert">
+                {resyncResult.errors.slice(0, 5).map((error, index) => <p key={`${index}-${error}`}>{error}</p>)}
+                {resyncResult.errors.length > 5 && <p>... +{resyncResult.errors.length - 5} more</p>}
               </div>
             )}
           </div>
@@ -223,7 +223,7 @@ export function BackupPage() {
             </div>
             <div>
               <p className="text-white font-medium">
-                {syncState.status === 'synced' ? 'Synced' :
+                {syncState.failedCount > 0 ? 'Sync Error' : syncState.status === 'synced' ? 'Synced' :
                  syncState.status === 'syncing' ? 'Syncing...' :
                  syncState.status === 'pending' ? `${syncState.pendingCount} pending` :
                  syncState.status === 'offline' ? 'Offline' :
