@@ -24,22 +24,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     async function init() {
       try {
-        // Initialize app (default settings, etc.)
-        await initializeApp();
+        // Initialization is best-effort and must never keep the preview blocked.
+        await Promise.race([
+          initializeApp(),
+          new Promise<void>((resolve) => setTimeout(resolve, 2500)),
+        ]);
 
         // Check if we should auto-restore from last backup
-        const needsRestore = await shouldAutoRestore();
+        const needsRestore = await Promise.race([
+          shouldAutoRestore(),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1500)),
+        ]);
         if (needsRestore) {
           console.log('[v0] Auto-restoring backup data from previous session...');
           // Note: Actual restore logic happens in backup module on-demand
           // This is just a signal that data should be available from IndexedDB
         }
 
-        // Initialize security data (roles, permissions, admin user)
-        await initializeSecurity();
+        // Initialize security data (roles, permissions, admin user) without blocking indefinitely.
+        await Promise.race([
+          initializeSecurity(),
+          new Promise<void>((resolve) => setTimeout(resolve, 2500)),
+        ]);
 
         // Get current session
-        const currentUser = await getCurrentUser();
+        const currentUser = await Promise.race([
+          getCurrentUser(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+        ]);
         setUser(currentUser);
       } catch (error) {
         console.error('Auth init error:', error);
@@ -49,7 +61,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    init();
+    void init();
+    const loadingFallback = window.setTimeout(() => {
+      console.warn('[v0] Auth initialization exceeded the preview startup budget; showing login.');
+      setIsLoading(false);
+    }, 6000);
+    return () => window.clearTimeout(loadingFallback);
   }, []);
 
   const login = async (username: string, password: string) => {

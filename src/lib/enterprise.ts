@@ -1,6 +1,6 @@
-import { getDB, generateId } from './db';
+import { getDB, generateId, getTransaction, saveTransaction, saveCODPayment, saveCODReceipt, getCODPaymentsByTransaction } from './db';
 import { queueForSync } from './sync';
-import type { OutboundDelivery, ReconciliationRecord, ReportFilters, ShiftRecord, OfferRule, SupplierFulfillment, Transaction, ReportSchedule, SafeDropRecord } from './types';
+import type { OutboundDelivery, ReconciliationRecord, ReportFilters, ShiftRecord, OfferRule, SupplierFulfillment, Transaction, ReportSchedule, SafeDropRecord, CODPayment, CODReceipt } from './types';
 import { logAuditEvent } from './audit';
 
 export async function saveEnterpriseRecord<T extends { id: string }>(store: string, table: string, record: T) {
@@ -48,8 +48,15 @@ export async function matchReconciliation(record: ReconciliationRecord, received
   return updated;
 }
 
+const DELIVERY_FLOW: Record<OutboundDelivery['status'], OutboundDelivery['status'][]> = {
+  pending: ['packed', 'assigned', 'cancelled'], packed: ['assigned', 'cancelled'], assigned: ['dispatched', 'cancelled'], dispatched: ['in_transit', 'failed', 'cancelled'], in_transit: ['delivered', 'failed', 'returned'], delivered: ['closed', 'returned'], closed: [], returned: [], failed: ['assigned', 'cancelled'], cancelled: [],
+};
+
 export async function updateDeliveryStatus(delivery: OutboundDelivery, status: OutboundDelivery['status'], actorId?: string, proof?: Pick<OutboundDelivery, 'proof_type' | 'proof_reference'>) {
-  const updated = { ...delivery, ...proof, status, updated_at: new Date().toISOString(), sync_status: 'pending' as const };
+  if (delivery.status !== status && !DELIVERY_FLOW[delivery.status].includes(status)) throw new Error(`Cannot move delivery from ${delivery.status} to ${status}.`);
+  if (status === 'delivered' && !proof?.proof_reference && !delivery.proof_reference) throw new Error('Delivery proof or reference is required before marking delivered.');
+  const now = new Date().toISOString();
+  const updated = { ...delivery, ...proof, status, delivered_at: status === 'delivered' ? now : delivery.delivered_at, dispatched_at: ['dispatched', 'in_transit'].includes(status) ? now : delivery.dispatched_at, updated_at: now, sync_status: 'pending' as const };
   await saveEnterpriseRecord('outbound_deliveries', 'outbound_deliveries', updated);
   await logAuditEvent({ eventType: 'SALE_UPDATED', entityType: 'outbound_delivery', entityId: delivery.id, oldValue: delivery, newValue: updated, userId: actorId });
   return updated;
@@ -84,9 +91,53 @@ export async function calculateReport(filters: ReportFilters) {
 }
 
 export async function createDelivery(transaction_id: string, data: Partial<OutboundDelivery> = {}) {
+  if (!transaction_id) throw new Error('A linked transaction is required.');
+  const fee = Math.max(0, Number(data.delivery_fee ?? 0));
+  const paid = Math.max(0, Number(data.delivery_fee_paid ?? 0));
+  if (paid > fee) throw new Error('Delivery fee paid cannot exceed the fee due.');
+  if (data.recipient_phone && !/^[+\d][\d\s-]{7,}$/.test(data.recipient_phone)) throw new Error('Enter a valid recipient phone number.');
   const now = new Date().toISOString();
-  const delivery: OutboundDelivery = { id: generateId(), transaction_id, status: 'pending', created_at: now, updated_at: now, sync_status: 'pending', ...data };
+  const delivery: OutboundDelivery = { id: generateId(), transaction_id, status: 'pending', delivery_fee: fee, delivery_fee_paid: paid, delivery_fee_status: fee === 0 ? 'waived' : paid >= fee ? 'paid' : paid > 0 ? 'partial' : 'unpaid', cod_status: data.cod_amount ? 'pending' : 'not_applicable', created_at: now, updated_at: now, sync_status: 'pending', ...data };
   return saveEnterpriseRecord('outbound_deliveries', 'outbound_deliveries', delivery);
+}
+
+export async function updateDelivery(delivery: OutboundDelivery, patch: Partial<OutboundDelivery>, actorId?: string) {
+  const fee = Math.max(0, Number(patch.delivery_fee ?? delivery.delivery_fee ?? 0));
+  const paid = Math.max(0, Number(patch.delivery_fee_paid ?? delivery.delivery_fee_paid ?? 0));
+  if (paid > fee) throw new Error('Delivery fee paid cannot exceed the fee due.');
+  if (patch.recipient_phone && !/^[+\d][\d\s-]{7,}$/.test(patch.recipient_phone)) throw new Error('Enter a valid recipient phone number.');
+  const updated = { ...delivery, ...patch, delivery_fee: fee, delivery_fee_paid: paid, delivery_fee_status: fee === 0 ? 'waived' : paid >= fee ? 'paid' : paid > 0 ? 'partial' : 'unpaid', updated_at: new Date().toISOString(), sync_status: 'pending' as const };
+  await saveEnterpriseRecord('outbound_deliveries', 'outbound_deliveries', updated);
+  await logAuditEvent({ eventType: 'SALE_UPDATED', entityType: 'outbound_delivery', entityId: delivery.id, oldValue: delivery, newValue: updated, userId: actorId });
+  return updated;
+}
+
+export async function collectCODPayment(input: { transactionId: string; amountReceived: number; paymentMethod: string; paymentAccountId?: string | null; paymentAccountName?: string | null; reference?: string; notes?: string; deviceId?: string }) {
+  const transaction = await getTransaction(input.transactionId);
+  if (!transaction || transaction.payment_method !== 'cod') throw new Error('COD transaction not found.');
+  const received = Number(input.amountReceived);
+  if (!Number.isFinite(received) || received <= 0) throw new Error('Enter a valid payment amount.');
+  const previousPayments = await getCODPaymentsByTransaction(transaction.id);
+  const previouslyPaid = previousPayments.reduce((sum, payment) => sum + payment.amount_applied, 0);
+  const outstanding = Math.max(0, transaction.total_amount - previouslyPaid);
+  if (outstanding <= 0) throw new Error('This COD order is already fully paid.');
+  const applied = Math.min(received, outstanding);
+  const paymentId = generateId();
+  const now = new Date().toISOString();
+  const payment: CODPayment = { id: paymentId, transaction_id: transaction.id, amount: received, amount_applied: applied, change_amount: received - applied, payment_method: input.paymentMethod, payment_account_id: input.paymentAccountId ?? null, payment_account_name: input.paymentAccountName ?? null, reference: input.reference, notes: input.notes, created_at: now, device_id: input.deviceId ?? generateId(), sync_status: 'pending' };
+  await saveCODPayment(payment);
+  const totalPaid = previouslyPaid + applied;
+  const updated: Transaction = { ...transaction, amount_paid: totalPaid, change_amount: payment.change_amount, balance_amount: Math.max(0, transaction.total_amount - totalPaid), cod_status: totalPaid >= transaction.total_amount ? 'PAID' : 'PARTIALLY_PAID', status: totalPaid >= transaction.total_amount ? 'completed' : 'pending', sync_status: 'pending' };
+  await saveTransaction(updated);
+  const deliveries = await listEnterpriseRecords<OutboundDelivery>('outbound_deliveries');
+  const delivery = deliveries.find((item) => item.transaction_id === transaction.id);
+  if (delivery) await saveEnterpriseRecord('outbound_deliveries', 'outbound_deliveries', { ...delivery, cod_collected: totalPaid, cod_status: totalPaid >= transaction.total_amount ? 'collected' : 'pending', sync_status: 'pending', updated_at: now });
+  const receipt: CODReceipt = { id: generateId(), receipt_number: `RCP-${now.slice(0, 10).replace(/-/g, '')}-${paymentId.slice(0, 8).toUpperCase()}`, transaction_id: transaction.id, payment_id: payment.id, receipt_type: 'cod_payment', amount: applied, issued_at: now, sync_status: 'pending' };
+  await saveCODReceipt(receipt);
+  await logAuditEvent({ eventType: 'COD_PAYMENT_COLLECTED', entityType: 'cod_payment', entityId: payment.id, oldValue: transaction, newValue: { transaction: updated, payment, receipt }, userId: input.deviceId });
+  if (updated.cod_status === 'PAID') await logAuditEvent({ eventType: 'COD_SETTLED', entityType: 'transaction', entityId: transaction.id, oldValue: transaction, newValue: updated, userId: input.deviceId });
+  await logAuditEvent({ eventType: 'COD_RECEIPT_GENERATED', entityType: 'cod_receipt', entityId: receipt.id, newValue: receipt, userId: input.deviceId });
+  return { transaction: updated, payment, receipt };
 }
 
 export async function createReconciliation(data: Omit<ReconciliationRecord, 'id' | 'created_at' | 'sync_status'>) {

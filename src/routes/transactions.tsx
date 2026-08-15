@@ -228,6 +228,8 @@ export function TransactionsPage() {
             amount_paid: txn.amount_paid,
             change_amount: txn.change_amount,
             payment_method: txn.payment_method,
+            payment_account_id: txn.payment_account_id,
+            payment_account_name: txn.payment_account_name,
             created_at: txn.created_at,
             customer_name: transaction.customer_name,
             customer_phone: transaction.phone,

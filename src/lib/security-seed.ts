@@ -17,7 +17,18 @@ export async function isSecurityInitialized(): Promise<boolean> {
   return roles.length > 0;
 }
 
-export async function initializeSecurityData(): Promise<void> {
+let securityInitializationPromise: Promise<void> | null = null;
+
+export function initializeSecurityData(): Promise<void> {
+  if (securityInitializationPromise) return securityInitializationPromise;
+  securityInitializationPromise = initializeSecurityDataOnce().catch((error) => {
+    securityInitializationPromise = null;
+    throw error;
+  });
+  return securityInitializationPromise;
+}
+
+async function initializeSecurityDataOnce(): Promise<void> {
   console.log('Checking security initialization...');
 
   const db = await getDB();
@@ -36,18 +47,18 @@ export async function initializeSecurityData(): Promise<void> {
     }
   }
 
-  // Initialize roles (only if not exists)
+  // Initialize roles and add any newly introduced system role.
   const existingRoles = await getAllRoles();
-  if (existingRoles.length === 0) {
-    console.log('Initializing roles...');
-    const now = new Date().toISOString();
-    const roleData: Array<{ code: RoleCode; name: string; description: string }> = [
-      { code: 'admin', name: 'Administrator', description: 'Full system access with all permissions' },
-      { code: 'manager', name: 'Manager', description: 'Store manager with sales, inventory, and approval permissions' },
-      { code: 'cashier', name: 'Cashier', description: 'Cashier with basic sales and customer permissions' },
-    ];
+  const now = new Date().toISOString();
+  const roleData: Array<{ code: RoleCode; name: string; description: string }> = [
+    { code: 'admin', name: 'System Administrator', description: 'Full system access with all permissions' },
+    { code: 'administrator', name: 'Admin', description: 'Direct high-risk transaction controls with full operational permissions' },
+    { code: 'manager', name: 'Manager', description: 'Store manager with sales, inventory, and approval permissions' },
+    { code: 'cashier', name: 'Cashier', description: 'Cashier with basic sales and customer permissions' },
+  ];
 
-    for (const rd of roleData) {
+  for (const rd of roleData) {
+    if (!existingRoles.some(role => role.code === rd.code)) {
       const role: Role = {
         id: generateId(),
         code: rd.code,

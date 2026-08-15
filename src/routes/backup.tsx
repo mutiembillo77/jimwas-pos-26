@@ -1,6 +1,6 @@
 // Backup & Restore Page - Export and import data
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { RoleGuard } from '../context/AuthContext';
 import {
@@ -13,7 +13,7 @@ import {
   importBackup,
   validateBackup,
 } from '../lib/backup';
-import { syncNow, getSyncState, subscribeToSyncState, resyncAllLocalProducts } from '../lib/sync';
+import { syncNow, getSyncState, subscribeToSyncState, resyncAllLocalProducts, getSyncQueueItems, retrySyncItem, retryAllSyncItems, type SyncQueueItem } from '../lib/sync';
 import type { BackupData, RestoreOptions, RestoreResult } from '../lib/backup';
 import type { SyncState } from '../lib/sync';
 
@@ -37,12 +37,15 @@ export function BackupPage() {
   const [restoreResult, setRestoreResult] = useState<RestoreResult | null>(null);
   const [showConfirmRestore, setShowConfirmRestore] = useState(false);
   const [syncState, setSyncState] = useState<SyncState>(getSyncState());
+  const [queueItems, setQueueItems] = useState<SyncQueueItem[]>([]);
+  const [isRetrying, setIsRetrying] = useState(false);
 
-  // Subscribe to sync state
-  useState(() => {
-    const unsubscribe = subscribeToSyncState(setSyncState);
+  const refreshQueue = async () => setQueueItems(await getSyncQueueItems());
+  useEffect(() => {
+    const unsubscribe = subscribeToSyncState((state) => { setSyncState(state); void refreshQueue(); });
+    void refreshQueue();
     return unsubscribe;
-  });
+  }, []);
 
   const handleExport = async () => {
     setIsExporting(true);
@@ -171,7 +174,7 @@ export function BackupPage() {
           <div className={`rounded-lg p-4 ${
             resyncResult.errors.length === 0
               ? 'bg-emerald-900/20 border border-emerald-700'
-              : 'bg-amber-900/20 border border-amber-700'
+              : 'bg-red-900/20 border border-red-700'
           }`}>
             <div className="grid grid-cols-3 gap-4 text-center mb-2">
               <div>
@@ -188,9 +191,9 @@ export function BackupPage() {
               </div>
             </div>
             {resyncResult.errors.length > 0 && (
-              <div className="text-xs text-red-400 mt-2">
-                {resyncResult.errors.slice(0, 3).join('\n')}
-                {resyncResult.errors.length > 3 && `\n... +${resyncResult.errors.length - 3} more`}
+              <div className="mt-2 max-h-24 overflow-y-auto space-y-1 text-xs text-red-300" role="alert">
+                {resyncResult.errors.slice(0, 5).map((error, index) => <p key={`${index}-${error}`}>{error}</p>)}
+                {resyncResult.errors.length > 5 && <p>... +{resyncResult.errors.length - 5} more</p>}
               </div>
             )}
           </div>
@@ -220,7 +223,7 @@ export function BackupPage() {
             </div>
             <div>
               <p className="text-white font-medium">
-                {syncState.status === 'synced' ? 'Synced' :
+                {syncState.failedCount > 0 ? 'Sync Error' : syncState.status === 'synced' ? 'Synced' :
                  syncState.status === 'syncing' ? 'Syncing...' :
                  syncState.status === 'pending' ? `${syncState.pendingCount} pending` :
                  syncState.status === 'offline' ? 'Offline' :
@@ -250,6 +253,14 @@ export function BackupPage() {
               </>
             )}
           </button>
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-3"><p className="text-xs text-slate-400">Queued changes are retained locally until confirmed by the cloud.</p><button onClick={async () => { setIsRetrying(true); await retryAllSyncItems(); await refreshQueue(); setIsRetrying(false); }} disabled={isRetrying || !queueItems.length || syncState.status === 'offline'} className="rounded-lg border border-amber-600 px-3 py-2 text-xs text-amber-200 disabled:opacity-50">{isRetrying ? 'Retrying...' : 'Retry all pending'}</button></div>
+        {queueItems.length > 0 && <div className="mt-3 flex max-h-56 flex-col gap-2 overflow-auto rounded-lg border border-slate-700 bg-slate-900/60 p-3">{queueItems.map((item) => <div key={item.id} className="flex items-start justify-between gap-3 rounded-md bg-slate-800 px-3 py-2 text-xs"><div className="min-w-0"><p className="font-medium text-slate-200">{item.table_name} · {item.operation}</p><p className="truncate text-slate-500">{item.last_error ?? 'Waiting for sync'} · retries: {item.retry_count ?? 0}</p></div><button onClick={async () => { await retrySyncItem(item.id); await refreshQueue(); }} disabled={syncState.status === 'offline'} className="shrink-0 text-emerald-300 disabled:opacity-50">Retry</button></div>)}</div>}
+        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div className="bg-slate-700 rounded-lg p-3"><p className="text-slate-400">Pending</p><p className="text-white font-semibold">{syncState.pendingCount}</p></div>
+          <div className="bg-slate-700 rounded-lg p-3"><p className="text-slate-400">Failed</p><p className="text-amber-400 font-semibold">{syncState.failedCount}</p></div>
+          <div className="bg-slate-700 rounded-lg p-3"><p className="text-slate-400">Conflicts</p><p className="text-red-400 font-semibold">{syncState.conflictCount}</p></div>
+          <div className="bg-slate-700 rounded-lg p-3"><p className="text-slate-400">Device</p><p className="text-white font-mono truncate" title={syncState.deviceId ?? 'Not initialized'}>{syncState.deviceId ? syncState.deviceId.slice(0, 8) : 'Initializing'}</p></div>
         </div>
       </div>
 
@@ -493,14 +504,14 @@ export function BackupPage() {
             <Database size={20} className="text-slate-400" />
             Data Management
           </h2>
-          <div className="bg-amber-900/20 border border-amber-700 rounded-lg p-4 mb-4">
-            <div className="flex items-center gap-2 text-amber-400 mb-2">
-              <AlertTriangle size={16} />
-              <span className="font-medium">Offline Storage</span>
+          <div className={`rounded-lg border p-4 mb-4 ${syncState.status === 'synced' ? 'bg-emerald-900/20 border-emerald-700' : syncState.status === 'offline' ? 'bg-amber-900/20 border-amber-700' : 'bg-red-900/20 border-red-700'}`}>
+            <div className={`flex items-center gap-2 mb-2 ${syncState.status === 'synced' ? 'text-emerald-400' : syncState.status === 'offline' ? 'text-amber-400' : 'text-red-400'}`}>
+              {syncState.status === 'synced' ? <Check size={16} /> : <AlertTriangle size={16} />}
+              <span className="font-medium">{syncState.status === 'synced' ? 'Cloud Sync Active' : syncState.status === 'offline' ? 'Offline Storage' : 'Cloud Sync Needs Attention'}</span>
             </div>
             <p className="text-xs text-slate-300">
-              Your data is stored locally in your browser. Regular backups are recommended.
-              Clearing browser data will remove all offline data.
+              {syncState.status === 'synced' ? 'Your local POS data is backed up through the cloud sync connection.' : syncState.error || 'Your data is stored locally in your browser. Regular backups are recommended.'}
+              {' '}Clearing browser data will remove all offline data.
             </p>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

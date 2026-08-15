@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { Component, useState, useEffect, type ErrorInfo, type ReactNode } from 'react';
 import { Layout } from './components/Layout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { POSTerminal } from './routes/pos';
@@ -25,18 +25,18 @@ function AppContent() {
   const { user, isLoading, isAuthenticated } = useAuth();
 
   useEffect(() => {
-    initNetworkListeners();
+    try {
+      initNetworkListeners();
+    } catch (error) {
+      console.warn('[v0] Network listener setup skipped:', error);
+    }
 
-    // Delay initial sync to avoid blocking UI
+    // Sync is strictly background work; never hold the first render hostage.
     const syncTimer = setTimeout(() => {
-      import('./lib/sync').then(({ syncNow }) => {
-        syncNow().then((result) => {
-          console.log('Initial sync:', result.message);
-        }).catch(err => {
-          console.error('Initial sync failed:', err);
-        });
+      void import('./lib/sync').then(({ syncNow }) => syncNow()).catch((error) => {
+        console.warn('[v0] Background sync skipped:', error);
       });
-    }, 2000);
+    }, 5000);
 
     return () => clearTimeout(syncTimer);
   }, []);
@@ -70,7 +70,7 @@ function AppContent() {
 
     switch (currentPage) {
       case 'pos':
-        return <ProtectedRoute routePath="/pos" fallback={accessDenied}><POSTerminal /></ProtectedRoute>;
+        return <ProtectedRoute routePath="/pos" fallback={accessDenied}><POSTerminal onDeliveryRequested={(transactionId) => { setCurrentPage('outbound-deliveries'); window.dispatchEvent(new CustomEvent('jimwas:open-delivery', { detail: { transactionId } })); }} /></ProtectedRoute>;
       case 'customers':
         return <ProtectedRoute routePath="/customers" fallback={accessDenied}><CustomersPage /></ProtectedRoute>;
       case 'products':
@@ -117,13 +117,38 @@ function AppContent() {
   );
 }
 
+type AppErrorBoundaryProps = { children: ReactNode };
+
+type AppErrorBoundaryState = { hasError: boolean; message: string };
+
+class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorBoundaryState> {
+  state: AppErrorBoundaryState = { hasError: false, message: '' };
+
+  static getDerivedStateFromError(error: unknown): AppErrorBoundaryState {
+    return { hasError: true, message: error instanceof Error ? error.message : 'The application could not be loaded.' };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[v0] Application render failed:', error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-slate-100"><section className="w-full max-w-lg rounded-xl border border-red-500/30 bg-slate-900 p-6 shadow-xl"><h1 className="text-xl font-semibold">Jimwas POS could not load</h1><p className="mt-2 text-sm text-slate-300">The preview encountered an initialization error. Reload the preview to try again.</p><p className="mt-3 rounded-lg bg-slate-950 p-3 font-mono text-xs text-red-300">{this.state.message}</p><button type="button" onClick={() => window.location.reload()} className="mt-5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white">Reload preview</button></section></main>;
+    }
+    return this.props.children;
+  }
+}
+
 function App() {
   return (
+    <AppErrorBoundary>
     <AuthProvider>
       <ToastProvider>
         <AppContent />
       </ToastProvider>
     </AuthProvider>
+    </AppErrorBoundary>
   );
 }
 

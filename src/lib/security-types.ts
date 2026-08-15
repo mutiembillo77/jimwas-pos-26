@@ -79,7 +79,7 @@ export const PERMISSIONS: Permission[] = [
 
 // ============ ROLES ============
 
-export type RoleCode = 'admin' | 'manager' | 'cashier';
+export type RoleCode = 'admin' | 'administrator' | 'manager' | 'cashier';
 
 export interface Role {
   id: string;
@@ -96,6 +96,7 @@ export interface Role {
 // Default role permission assignments
 export const DEFAULT_ROLE_PERMISSIONS: Record<RoleCode, string[]> = {
   admin: PERMISSIONS.map(p => p.id), // Full access
+  administrator: PERMISSIONS.map(p => p.id), // Full access without approval for high-risk actions
   manager: [
     // Sales - full access
     'perm-sales-view', 'perm-sales-create', 'perm-sales-edit', 'perm-sales-void', 'perm-sales-refund',
@@ -170,6 +171,12 @@ export type AuditEventType =
   | 'SALE_VOIDED'
   | 'SALE_REFUNDED'
   | 'SALE_UPDATED'
+  | 'COD_CREATED'
+  | 'COD_PAYMENT_COLLECTED'
+  | 'COD_SETTLED'
+  | 'COD_RECEIPT_GENERATED'
+  | 'COD_DELIVERED'
+  | 'COD_RETURNED'
   // Product events
   | 'PRODUCT_CREATED'
   | 'PRODUCT_UPDATED'

@@ -137,7 +137,7 @@ export async function canPerformWithoutApproval(
   const hasPerm = await hasPermission(userId, requiredPermission);
 
   // Role-based skip for admin
-  if (user.role_code === 'admin') {
+  if (user.role_code === 'admin' || user.role_code === 'administrator') {
     return { canPerform: true, requiresApproval: false };
   }
 
