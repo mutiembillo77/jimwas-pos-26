@@ -1,7 +1,7 @@
 import React from 'react';
 import { Receipt, Calendar, User, CreditCard, ShoppingBag, CheckCircle2, ShieldAlert, Sparkles, Hash, Phone } from 'lucide-react';
 import type { Transaction, Customer } from '../lib/types';
-import { resolvePaymentAccountDetails } from '../lib/print';
+import { resolvePaymentAccountDetails, maskPhoneNumber } from '../lib/print';
 
 interface TransactionReceiptPopoverProps {
   transaction: Transaction;
@@ -11,6 +11,9 @@ interface TransactionReceiptPopoverProps {
 
 export function TransactionReceiptPopover({ transaction, customer, position }: TransactionReceiptPopoverProps) {
   const accountDetails = resolvePaymentAccountDetails(transaction);
+  const phone = customer?.phone || transaction.customer_phone;
+  const maskedPhone = maskPhoneNumber(phone);
+
   // Determine positioning style
   const style: React.CSSProperties = position
     ? {
@@ -97,15 +100,15 @@ export function TransactionReceiptPopover({ transaction, customer, position }: T
             <User size={12} className="text-slate-500" /> Customer:
           </span>
           <span className="text-slate-200 font-medium">
-            {customer?.name || 'Walk-in Customer'}
+            {customer?.name || transaction.customer_name || 'Walk-in Customer'}
           </span>
         </div>
-        {customer?.phone && (
+        {maskedPhone && (
           <div className="flex justify-between items-center text-slate-400 text-[11px]">
             <span className="flex items-center gap-1">
               <Phone size={12} className="text-slate-500" /> Phone:
             </span>
-            <span className="text-slate-300 font-mono">{customer.phone}</span>
+            <span className="text-slate-300 font-mono">{maskedPhone}</span>
           </div>
         )}
         {transaction.sale_type && (

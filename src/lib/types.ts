@@ -93,6 +93,10 @@ export interface Transaction {
   delivery_contact?: string;
   consignment_number?: string;
   cod_payments?: CODPayment[];
+  customer_name?: string;
+  customer_phone?: string;
+  cashier_name?: string;
+  mpesa_receipt?: string;
 }
 
 export interface InstallmentPlan {

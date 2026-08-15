@@ -42,6 +42,59 @@ function escapeHtml(value: unknown): string {
 }
 
 /**
+ * Privacy helper to mask customer phone numbers on receipts.
+ *
+ * Examples:
+ *   0712345678 -> 07XXXXXX78
+ *   0798765400 -> 07XXXXXX00
+ *   0112345600 -> 01XXXXXX00
+ *   +254712345678 -> +254 7XXXXXX78
+ *
+ * Rules:
+ * - If phone is empty/null/undefined -> returns null.
+ * - Removes non-digit formatting characters for length calculation.
+ * - For Kenyan 10-digit numbers starting with 07 or 01:
+ *   shows first 2 digits + X characters + last 2 digits.
+ * - For +254/254 prefixed numbers: outputs +254 7XXXXXX78.
+ * - For general phone strings: masks middle digits preserving first 2 and last 2.
+ * - Never returns the complete phone number.
+ */
+export function maskPhoneNumber(phone?: string | null): string | null {
+  if (!phone) return null;
+  const trimmed = phone.trim();
+  if (!trimmed) return null;
+
+  const hasPlus = trimmed.startsWith('+');
+  const digits = trimmed.replace(/\D/g, '');
+  if (digits.length === 0) return null;
+
+  // 12-digit Kenyan numbers starting with 254 (e.g. +254712345678 or 254712345678)
+  if (digits.length === 12 && digits.startsWith('254')) {
+    const localNine = digits.slice(3);
+    const firstDigit = localNine[0];
+    const lastTwo = localNine.slice(-2);
+    return `${hasPlus ? '+' : ''}254 ${firstDigit}XXXXXX${lastTwo}`;
+  }
+
+  // 10-digit Kenyan mobile numbers starting with 07 or 01
+  if (digits.length === 10 && (digits.startsWith('07') || digits.startsWith('01'))) {
+    const prefix = digits.slice(0, 2);
+    const lastTwo = digits.slice(-2);
+    return `${prefix}XXXXXX${lastTwo}`;
+  }
+
+  // General fallback preserving first 2 and last 2 characters
+  if (digits.length > 4) {
+    const prefix = digits.slice(0, 2);
+    const lastTwo = digits.slice(-2);
+    const maskLen = Math.max(1, digits.length - 4);
+    return `${hasPlus ? '+' : ''}${prefix}${'X'.repeat(maskLen)}${lastTwo}`;
+  }
+
+  return `${digits.slice(0, 1)}X${digits.slice(-1)}`;
+}
+
+/**
  * Resolve payment account information from explicit transaction data
  * or known Jimwas payment account identifiers/names.
  *
@@ -244,14 +297,16 @@ function buildReceiptHtml(options: PrintOptions): string {
     );
   }
 
+  const maskedPhone = maskPhoneNumber(transaction.customer_phone);
+
   if (
     receipt.show_customer_phone &&
-    transaction.customer_phone
+    maskedPhone
   ) {
     lines.push(
       formatLine(
         'Phone:',
-        transaction.customer_phone,
+        maskedPhone,
       ),
     );
   }
@@ -319,12 +374,20 @@ function buildReceiptHtml(options: PrintOptions): string {
   );
 
   /*
-   * Payment account label
+   * Resolve payment account details ONCE.
+   *
+   * This prevents the receipt from printing the same PayBill
+   * and A/C number twice when the transaction already contains
+   * those values.
    */
   const paymentMethodLower =
     paymentMethod.toLowerCase();
 
+  const accountInfo =
+    resolvePaymentAccountDetails(transaction);
+
   const accountLabel =
+    accountInfo.name ||
     transaction.payment_account_name ||
     (
       paymentMethodLower === 'cash'
@@ -342,16 +405,6 @@ function buildReceiptHtml(options: PrintOptions): string {
       accountLabel,
     ),
   );
-
-  /*
-   * Resolve payment account details ONCE.
-   *
-   * This prevents the receipt from printing the same PayBill
-   * and A/C number twice when the transaction already contains
-   * those values.
-   */
-  const accountInfo =
-    resolvePaymentAccountDetails(transaction);
 
   if (accountInfo.paybill) {
     lines.push(
