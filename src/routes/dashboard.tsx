@@ -1,9 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-<<<<<<< HEAD
 import { TrendingUp, DollarSign, ShoppingCart, Users, CreditCard, Star, Calendar, Receipt, FileText, Printer, Download, Search, RefreshCw } from 'lucide-react';
-=======
-import { TrendingUp, DollarSign, ShoppingCart, Users, CreditCard, Star, Calendar, FileText, Printer, Download, Search, RefreshCw, Receipt } from 'lucide-react';
->>>>>>> feat/dashboard-receipt-popover
 import { getAllTransactions, getAllCustomers, getAllInstallmentPlans, getAllProducts } from '../lib/db';
 import { getTodaySummary, getWeekSummary, getMonthSummary, formatCurrency } from '../lib/ledger';
 import { KCBDashboardWidget } from '../components/MpesaDashboardWidget';
