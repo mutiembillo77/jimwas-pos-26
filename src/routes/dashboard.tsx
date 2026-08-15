@@ -1,5 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
+<<<<<<< HEAD
 import { TrendingUp, DollarSign, ShoppingCart, Users, CreditCard, Star, Calendar, Receipt, FileText, Printer, Download, Search, RefreshCw } from 'lucide-react';
+=======
+import { TrendingUp, DollarSign, ShoppingCart, Users, CreditCard, Star, Calendar, FileText, Printer, Download, Search, RefreshCw, Receipt } from 'lucide-react';
+>>>>>>> feat/dashboard-receipt-popover
 import { getAllTransactions, getAllCustomers, getAllInstallmentPlans, getAllProducts } from '../lib/db';
 import { getTodaySummary, getWeekSummary, getMonthSummary, formatCurrency } from '../lib/ledger';
 import { KCBDashboardWidget } from '../components/MpesaDashboardWidget';
@@ -160,7 +164,7 @@ export function DashboardPage() {
       const customer = customers.find((entry) => entry.id === tx.customer_id)?.name || 'Walk-in';
       return `<tr><td>${new Date(tx.created_at).toLocaleDateString()}<br><small>${new Date(tx.created_at).toLocaleTimeString()}</small></td><td>${customer}</td><td><strong>${item.product_name}</strong><br><small>${item.quantity} × KES ${item.unit_price.toLocaleString()}</small></td><td>${item.quantity}</td><td class="${stockClass}">${stock <= 0 ? 'Out of stock' : `${stock} in stock`}</td><td>KES ${item.subtotal.toLocaleString()}</td><td>${tx.payment_method === 'cod' ? `Payment C.O.D. · ${tx.cod_status === 'PAID' ? 'Paid' : 'Status on delivery'}` : tx.payment_method}</td><td>${tx.payment_account_name || tx.payment_account_id || 'Unassigned'}</td></tr>`;
     })).join('');
-    const html = `<!doctype html><html><head><title>Jimwas POS Detailed Report</title><style>body{font:13px Arial,sans-serif;color:#172033;margin:28px}h1{margin:0 0 4px}p{color:#64748b}.actions{margin:18px 0}button{padding:10px 16px;border:0;border-radius:6px;background:#059669;color:white;font-weight:700}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #dbe3ee;padding:8px;text-align:left;vertical-align:top}th{background:#eaf1f7}small{color:#64748b}.ok{color:#047857;background:#ecfdf5;font-weight:700}.low{color:#b45309;background:#fffbeb;font-weight:700}.out{color:#b91c1c;background:#fef2f2;font-weight:700}@media print{.actions{display:none}@page{margin:12mm}}</style></head><body><h1>Jimwas POS — Detailed Sales Report</h1><p>Period: ${timeRange === 'today' ? 'Today' : timeRange === 'week' ? 'This Week' : 'This Month'} | Generated: ${generatedAt.toLocaleString()}</p><div class="actions"><button onclick="window.print()">Print / Save as PDF</button></div><table><thead><tr><th>Date & time</th><th>Customer</th><th>Full item description</th><th>Qty</th><th>Current stock</th><th>Amount</th><th>Payment C.O.D. / Status on delivery</th><th>Account</th></tr></thead><tbody>${rows || '<tr><td colspan="7">No transactions for this period</td></tr>'}</tbody></table><p>Paybill No. 522522 | A/C No. 7941675</p><p><strong>Thank You For Shopping With Us</strong></p></body></html>`;
+    const html = `<!doctype html><html><head><title>Jimwas POS Detailed Report</title><style>body{font:13px Arial,sans-serif;color:#172033;margin:28px}h1{margin:0 0 4px}p{color:#64748b}.actions{margin:18px 0}button{padding:10px 16px;border:0;border-radius:6px;background:#059669;color:white;font-weight:700}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #dbe3ee;padding:8px;text-align:left;vertical-align:top}th{background:#eaf1f7}small{color:#64748b}.ok{color:#047857;background:#ecfdf5;font-weight:700}.low{color:#b45309;background:#fffbeb;font-weight:700}.out{color:#b91c1c;background:#fef2f2;font-weight:700}@media print{.actions{display:none}@page{margin:12mm}}</style></head><body><h1>Jimwas POS — Detailed Sales Report</h1><p>Period: ${timeRange === 'today' ? 'Today' : timeRange === 'week' ? 'This Week' : 'This Month'} | Generated: ${generatedAt.toLocaleString()}</p><div class="actions"><button onclick="window.print()">Print / Save as PDF</button></div><table><thead><tr><th>Date & time</th><th>Customer</th><th>Full item description</th><th>Qty</th><th>Current stock</th><th>Amount</th><th>Payment C.O.D. / Status on delivery</th><th>Account</th></tr></thead><tbody>${rows || '<tr><td colspan="7">No transactions for this period</td></tr>'}</tbody></table><p><strong>Thank You For Shopping With Us</strong></p></body></html>`;
     const reportWindow = window.open('', '_blank');
     if (!reportWindow) return;
     reportWindow.document.open();
@@ -353,7 +357,9 @@ export function DashboardPage() {
                   <th className="pb-2">Customer</th>
                   <th className="pb-2">Items</th>
                   <th className="pb-2 text-right">Amount</th>
-                  <th className="pb-2 text-right">Payment C.O.D. / Status on delivery</th><th className="pb-2 text-right">Account</th>
+                  <th className="pb-2 text-right">Method</th>
+                  <th className="pb-2 text-right">Payment C.O.D. / Status on delivery</th>
+                  <th className="pb-2 text-right">Account</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700">

@@ -226,7 +226,7 @@ export function BackupPage() {
                 {syncState.failedCount > 0 ? 'Sync Error' : syncState.status === 'synced' ? 'Synced' :
                  syncState.status === 'syncing' ? 'Syncing...' :
                  syncState.status === 'pending' ? `${syncState.pendingCount} pending` :
-                 syncState.status === 'offline' ? 'Offline' :
+                 syncState.status === 'offline' ? 'Offline / Local Only' :
                  'Sync Error'}
               </p>
               {syncState.lastSync && (
@@ -521,7 +521,7 @@ export function BackupPage() {
             </div>
             <div className="bg-slate-700 rounded-lg p-3">
               <p className="text-xs text-slate-400">Sync Status</p>
-              <p className="text-white font-medium capitalize">{syncState.status}</p>
+              <p className="text-white font-medium capitalize">{syncState.status === 'offline' ? 'Offline / Local Only' : syncState.status}</p>
             </div>
             <div className="bg-slate-700 rounded-lg p-3">
               <p className="text-xs text-slate-400">Pending Items</p>
