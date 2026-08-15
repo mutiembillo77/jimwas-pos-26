@@ -2,7 +2,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { getDB, getSyncQueue, removeFromSyncQueue, addToSyncQueue, generateId, getSyncMetadata, setSyncMetadata } from './db';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? import.meta.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 let _supabase: SupabaseClient | null = null;
 
@@ -48,18 +48,6 @@ async function getDeviceId(): Promise<string> {
   return id;
 }
 
-function formatSyncError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string') return error;
-  if (error && typeof error === 'object') {
-    const candidate = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
-    const parts = [candidate.message, candidate.details, candidate.hint, candidate.code].filter((part): part is string => typeof part === 'string' && part.length > 0);
-    if (parts.length > 0) return parts.join(' — ');
-    try { return JSON.stringify(error); } catch { return 'Unknown sync error'; }
-  }
-  return 'Unknown sync error';
-}
-
 const syncListeners: Set<(state: SyncState) => void> = new Set();
 
 export function subscribeToSyncState(listener: (state: SyncState) => void): () => void {
@@ -98,15 +86,12 @@ export async function retrySyncItem(id: string): Promise<{ success: boolean; mes
     await processSyncItem(item);
     await removeFromSyncQueue(item.id);
     await checkPendingCount();
-    syncState.error = null;
-    syncState.status = syncState.pendingCount === 0 ? 'synced' : 'pending';
-    notifySyncState();
     return { success: true, message: 'Item synced successfully' };
   } catch (error) {
-    await addToSyncQueue({ ...item, operation: item.operation as 'insert' | 'update' | 'delete', retry_count: (item.retry_count ?? 0) + 1, next_retry_at: undefined, last_error: formatSyncError(error) } as any);
-    syncState.failedCount = (await getSyncQueueItems()).filter((entry) => (entry.retry_count ?? 0) > 0).length;
+    await addToSyncQueue({ ...item, operation: item.operation as 'insert' | 'update' | 'delete', retry_count: (item.retry_count ?? 0) + 1, next_retry_at: undefined, last_error: error instanceof Error ? error.message : 'Sync failed' } as any);
+    syncState.failedCount += 1;
     syncState.status = 'degraded';
-    syncState.error = error instanceof Error ? `${item.table_name}: ${error.message}` : `Failed to sync ${item.table_name}`;
+    syncState.error = error instanceof Error ? error.message : 'Sync failed';
     notifySyncState();
     return { success: false, message: syncState.error };
   }
@@ -149,11 +134,6 @@ async function checkPendingCount() {
   try {
     const queue = await getSyncQueue();
     syncState.pendingCount = queue.length;
-    syncState.failedCount = queue.filter((item) => (item.retry_count ?? 0) > 0).length;
-    if (queue.length === 0 && isOnline && getSupabase()) {
-      syncState.status = 'synced';
-      syncState.error = null;
-    }
     notifySyncState();
   } catch (error) {
     console.error('Failed to check pending count:', error);
@@ -167,8 +147,8 @@ export function getOnlineStatus(): boolean {
 async function triggerSync() {
   if (!isOnline || isSyncing) return;
   if (!getSupabase()) {
-    syncState.status = isOnline ? 'error' : 'offline';
-    syncState.error = isOnline ? 'Supabase configuration is unavailable. Local operations remain enabled.' : 'Browser is offline. Local operations remain enabled.';
+    syncState.status = 'offline';
+    syncState.error = 'Supabase is not configured. Local operations remain enabled.';
     notifySyncState();
     return;
   }
@@ -195,7 +175,7 @@ async function triggerSync() {
         console.error('Sync failed for item:', item.id, item.table_name, item.operation, error);
         const retryCount = (item.retry_count ?? 0) + 1;
         const retryDelay = Math.min(60 * 60 * 1000, 1000 * 2 ** Math.min(retryCount, 10));
-        await addToSyncQueue({ ...item, retry_count: retryCount, next_retry_at: new Date(Date.now() + retryDelay).toISOString(), last_error: formatSyncError(error) });
+        await addToSyncQueue({ ...item, retry_count: retryCount, next_retry_at: new Date(Date.now() + retryDelay).toISOString(), last_error: error instanceof Error ? error.message : 'Sync failed' });
         failCount++;
       }
     }
@@ -243,7 +223,7 @@ async function processSyncItem(item: { table_name: string; operation: string; da
       break;
     }
     case 'update': {
-      const result = await table.upsert(data, { onConflict: 'id', ignoreDuplicates: false });
+      const result = await table.upsert(data);
       error = result.error;
       break;
     }
@@ -565,8 +545,11 @@ export async function resyncAllLocalProducts(): Promise<{ synced: number; skippe
         cost: product.cost ?? 0,
         stock: product.stock,
         category: product.category ?? null,
-        image_url: product.image_url ?? null,
-        is_active: product.is_active ?? true,
+        barcode: product.barcode ?? null,
+        low_stock_alert: product.lowStockAlert ?? 5,
+        tax_category: product.taxCategory ?? 'standard_16',
+        is_active: product.isActive ?? true,
+        sync_status: 'synced',
         created_at: product.created_at ?? new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -585,7 +568,7 @@ export async function resyncAllLocalProducts(): Promise<{ synced: number; skippe
 
       synced++;
     } catch (err) {
-      const errMsg = formatSyncError(err);
+      const errMsg = err instanceof Error ? err.message : String(err);
       errors.push(`Failed to sync "${product.name}": ${errMsg}`);
     }
   }

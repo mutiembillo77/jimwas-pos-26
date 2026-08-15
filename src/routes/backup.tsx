@@ -174,7 +174,7 @@ export function BackupPage() {
           <div className={`rounded-lg p-4 ${
             resyncResult.errors.length === 0
               ? 'bg-emerald-900/20 border border-emerald-700'
-              : 'bg-red-900/20 border border-red-700'
+              : 'bg-amber-900/20 border border-amber-700'
           }`}>
             <div className="grid grid-cols-3 gap-4 text-center mb-2">
               <div>
@@ -191,9 +191,9 @@ export function BackupPage() {
               </div>
             </div>
             {resyncResult.errors.length > 0 && (
-              <div className="mt-2 max-h-24 overflow-y-auto space-y-1 text-xs text-red-300" role="alert">
-                {resyncResult.errors.slice(0, 5).map((error, index) => <p key={`${index}-${error}`}>{error}</p>)}
-                {resyncResult.errors.length > 5 && <p>... +{resyncResult.errors.length - 5} more</p>}
+              <div className="text-xs text-red-400 mt-2">
+                {resyncResult.errors.slice(0, 3).join('\n')}
+                {resyncResult.errors.length > 3 && `\n... +${resyncResult.errors.length - 3} more`}
               </div>
             )}
           </div>
@@ -223,7 +223,7 @@ export function BackupPage() {
             </div>
             <div>
               <p className="text-white font-medium">
-                {syncState.failedCount > 0 ? 'Sync Error' : syncState.status === 'synced' ? 'Synced' :
+                {syncState.status === 'synced' ? 'Synced' :
                  syncState.status === 'syncing' ? 'Syncing...' :
                  syncState.status === 'pending' ? `${syncState.pendingCount} pending` :
                  syncState.status === 'offline' ? 'Offline' :
@@ -504,14 +504,14 @@ export function BackupPage() {
             <Database size={20} className="text-slate-400" />
             Data Management
           </h2>
-          <div className={`rounded-lg border p-4 mb-4 ${syncState.status === 'synced' ? 'bg-emerald-900/20 border-emerald-700' : syncState.status === 'offline' ? 'bg-amber-900/20 border-amber-700' : 'bg-red-900/20 border-red-700'}`}>
-            <div className={`flex items-center gap-2 mb-2 ${syncState.status === 'synced' ? 'text-emerald-400' : syncState.status === 'offline' ? 'text-amber-400' : 'text-red-400'}`}>
-              {syncState.status === 'synced' ? <Check size={16} /> : <AlertTriangle size={16} />}
-              <span className="font-medium">{syncState.status === 'synced' ? 'Cloud Sync Active' : syncState.status === 'offline' ? 'Offline Storage' : 'Cloud Sync Needs Attention'}</span>
+          <div className="bg-amber-900/20 border border-amber-700 rounded-lg p-4 mb-4">
+            <div className="flex items-center gap-2 text-amber-400 mb-2">
+              <AlertTriangle size={16} />
+              <span className="font-medium">Offline Storage</span>
             </div>
             <p className="text-xs text-slate-300">
-              {syncState.status === 'synced' ? 'Your local POS data is backed up through the cloud sync connection.' : syncState.error || 'Your data is stored locally in your browser. Regular backups are recommended.'}
-              {' '}Clearing browser data will remove all offline data.
+              Your data is stored locally in your browser. Regular backups are recommended.
+              Clearing browser data will remove all offline data.
             </p>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
