@@ -75,6 +75,8 @@ export async function initiateKCBSTKPush(
     transactionId: options?.transactionId,
   };
 
+  const idempotencyKey = `${options?.transactionId || options?.accountReference || payment.id}:${phone}:${amount.toFixed(2)}`;
+
   // 2. Enforce timeout using AbortController (10s)
   const controller = new AbortController();
   const timeoutMs = 10000;
@@ -86,6 +88,7 @@ export async function initiateKCBSTKPush(
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'X-Idempotency-Key': idempotencyKey,
       },
       body: JSON.stringify(payload),
       signal: controller.signal,
