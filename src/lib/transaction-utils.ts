@@ -169,8 +169,8 @@ export function validatePhoneNumber(phone: string): { valid: boolean; error?: st
   // Airtel: 100-108, 730-739, 750-756, 762, 767, 780-789
   // Other carriers: 010-019, 050-059, 070-079, 080-089
   // Including all 01X and 05X prefixes for other carriers
-  const validPrefixPattern = /^0(?:1[0-9]|5[0-9]|7[0-9]{2}|8[0-9]{2})\d{7}$/;
-  const validIntlPrefixPattern = /^254(?:1[0-9]|5[0-9]|7[0-9]{2}|8[0-9]{2})\d{7}$/;
+  const validPrefixPattern = /^0(?:1[0-9]|5[0-9]|7[0-9]|8[0-9])\d{8}$/;
+  const validIntlPrefixPattern = /^254(?:1[0-9]|5[0-9]|7[0-9]|8[0-9])\d{8}$/;
   
   // Local format: 0XXXXXXXXX (10 digits)
   if (cleaned.length === 10) {
