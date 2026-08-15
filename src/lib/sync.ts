@@ -29,7 +29,7 @@ export interface SyncState {
   error: string | null;
 }
 
-let syncState: SyncState = {
+const syncState: SyncState = {
   status: 'synced', pendingCount: 0, failedCount: 0, conflictCount: 0,
   lastSync: null, lastPush: null, lastPull: null, deviceId: null, error: null,
 };
@@ -118,7 +118,8 @@ export async function retryAllSyncItems(): Promise<{ success: number; failed: nu
   let failed = 0;
   for (const item of items) {
     const result = await retrySyncItem(item.id);
-    result.success ? success++ : failed++;
+    if (result.success) success++;
+    else failed++;
   }
   await checkPendingCount();
   return { success, failed };
@@ -303,7 +304,7 @@ const TABLE_CONFIGS: TableSyncConfig[] = [
   { table: 'safe_drops', store: 'safe_drops', orderBy: 'created_at', limit: 500 },
 ];
 
-async function syncTableFromRemote(client: SupabaseClient, db: Awaited<ReturnType<typeof getDB>>, config: TableSyncConfig) {
+async function syncTableFromRemote(client: SupabaseClient, db: any, config: TableSyncConfig) {
   let query = client.from(config.table).select(
     config.relation ? `*, ${config.relation.table}(*)` : '*'
   );
@@ -315,12 +316,13 @@ async function syncTableFromRemote(client: SupabaseClient, db: Awaited<ReturnTyp
     query = query.limit(config.limit);
   }
 
-  const { data } = await query;
-  if (!data) return;
+  const { data: rawData } = await query;
+  if (!rawData) return;
+  const data = rawData as Record<string, any>[];
 
   if (config.single) {
     if (data.length > 0) {
-      await db.put(config.store, { ...data[0], sync_status: 'synced' });
+      await db.put(config.store as any, { ...data[0], sync_status: 'synced' });
     }
     return;
   }
@@ -332,7 +334,7 @@ async function syncTableFromRemote(client: SupabaseClient, db: Awaited<ReturnTyp
       if (fieldValue && seenUniqueValues.has(fieldValue)) continue;
       if (fieldValue) seenUniqueValues.add(fieldValue);
       if (fieldValue) {
-        const existing = await db.getFromIndex(config.store, config.uniqueIndex, fieldValue);
+        const existing = await db.getFromIndex(config.store as any, config.uniqueIndex, fieldValue);
         if (existing && existing.id !== row.id) {
           const pending = await getSyncQueue();
           const hasPendingWrite = pending.some(item => item.table_name === config.table && item.data.id === existing.id);
@@ -347,7 +349,7 @@ async function syncTableFromRemote(client: SupabaseClient, db: Awaited<ReturnTyp
       ? { ...row, sync_status: 'synced', items: row[config.relation.field] || [] }
       : { ...row, sync_status: 'synced' };
 
-    await db.put(config.store, record);
+    await db.put(config.store as any, record);
   }
 }
 

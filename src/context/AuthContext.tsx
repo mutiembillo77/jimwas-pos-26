@@ -156,7 +156,7 @@ export function PermissionGuard({ permission, requireAll = false, children, fall
 
 // Role Guard component
 interface RoleGuardProps {
-  allowedRoles: Array<'admin' | 'manager' | 'cashier'>;
+  allowedRoles: Array<'admin' | 'administrator' | 'manager' | 'cashier'>;
   children: ReactNode;
   fallback?: ReactNode;
 }

@@ -60,6 +60,7 @@ export interface PeriodSummary {
   total_refunds: number;
   total_voids: number;
   total_installment_payments: number;
+  total_loyalty_redemptions: number;
   total_income: number;
   total_expenses: number;
   total_adjustments: number;
@@ -272,6 +273,7 @@ export async function getPeriodSummary(
     total_refunds: 0,
     total_voids: 0,
     total_installment_payments: 0,
+    total_loyalty_redemptions: 0,
     total_income: 0,
     total_expenses: 0,
     total_adjustments: 0,
@@ -406,6 +408,7 @@ export function getPaymentMethodLabel(method: string): string {
     card: 'Card',
     bank_transfer: 'Bank Transfer',
     loyalty: 'Loyalty Points',
+    kcb: 'KCB M-Pesa',
     unknown: 'Other',
   };
   return labels[method] || method;
@@ -472,7 +475,7 @@ export async function createManualEntry(
 
 // Get default expense categories
 export async function getExpenseCategories(): Promise<ExpenseCategoryRecord[]> {
-  let categories = await getAllExpenseCategories();
+  const categories = await getAllExpenseCategories();
 
   if (categories.length === 0) {
     const defaults = [

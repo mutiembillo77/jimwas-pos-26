@@ -1,8 +1,7 @@
 import { restoreFromBackup, type BackupData } from './db';
 
 export async function populateDatabase() {
-  try {
-    const response = await fetch('/data/jimwas-backup-sample.json');
+  const response = await fetch('/data/jimwas-backup-sample.json');
     if (!response.ok) {
       throw new Error(
         response.status === 404
@@ -26,7 +25,4 @@ export async function populateDatabase() {
 
     const result = await restoreFromBackup(backup);
     return result;
-  } catch (error) {
-    throw error;
-  }
 }

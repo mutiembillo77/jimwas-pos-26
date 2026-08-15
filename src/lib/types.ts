@@ -95,7 +95,9 @@ export interface Transaction {
   cod_payments?: CODPayment[];
   customer_name?: string;
   customer_phone?: string;
+  cashier_id?: string;
   cashier_name?: string;
+  branch_id?: string;
   mpesa_receipt?: string;
 }
 

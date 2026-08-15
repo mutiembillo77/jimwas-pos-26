@@ -136,6 +136,7 @@ export interface User {
   email: string;
   password_hash: string;
   full_name: string;
+  name?: string;
   role_id: string;
   role_code: RoleCode;
   branch_id?: string;

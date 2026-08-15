@@ -10,4 +10,10 @@ export interface PaymentRequest {
   invoiceNumber: string;
   status?: PaymentStatus;
   raw?: any;
+  callbackUrl?: string;
+  sharedShortCode?: string;
+  orgShortCode?: string;
+  orgPassKey?: string;
+  transactionDescription?: string;
+  metadata?: Record<string, unknown>;
 }

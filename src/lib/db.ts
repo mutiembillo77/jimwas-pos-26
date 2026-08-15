@@ -77,10 +77,18 @@ interface POSDatabase extends DBSchema {
       total_amount: number;
       amount_paid: number;
       change_amount: number;
-      payment_method: string;
-      payment_account_id?: string | null;
-      payment_account_name?: string | null;
-      status: string;
+  payment_method: 'cash' | 'card' | 'mpesa' | 'cod' | 'kcb' | string;
+  payment_account_id?: string | null;
+  payment_account_name?: string | null;
+  payment_account_paybill?: string | null;
+  payment_account_number?: string | null;
+  cashier_id?: string;
+  cashier_name?: string;
+  branch_id?: string;
+  customer_name?: string;
+  customer_phone?: string;
+  mpesa_receipt?: string;
+  status: string;
       notes?: string;
       created_at: string;
       sync_status: 'pending' | 'synced';
@@ -1157,7 +1165,7 @@ export async function getSecurityEventsByUser(userId: string): Promise<SecurityE
 
 export async function getUnresolvedSecurityEvents(): Promise<SecurityEvent[]> {
   const db = await getDB();
-  return db.getAllFromIndex('security_events', 'by-resolved', false);
+  return db.getAllFromIndex('security_events', 'by-resolved', 'false');
 }
 
 // Price change history operations

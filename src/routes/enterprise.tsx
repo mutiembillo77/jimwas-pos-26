@@ -79,8 +79,6 @@ export function EnterpriseOperationsPage({ section = 'reports', openTransactionI
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  if ((active as string) === 'reports') return <ReportsWorkspace />;
-
   const reconciliationSummary = useMemo(() => reconciliations.reduce<Record<string, number>>((summary, row) => { summary[row.status] = (summary[row.status] || 0) + 1; return summary; }, {}), [reconciliations]);
   const openShiftRecord = shifts.find((shift) => shift.status === 'open');
   const tabs = [
@@ -90,6 +88,8 @@ export function EnterpriseOperationsPage({ section = 'reports', openTransactionI
     { id: 'shifts' as const, label: 'Shifts / X-Y-Z', icon: WalletCards },
     { id: 'offers' as const, label: 'Offers', icon: Plus },
   ];
+
+  if ((active as string) === 'reports') return <ReportsWorkspace />;
 
   const runAction = async (action: () => Promise<unknown>, message: string) => {
     setIsBusy(true);

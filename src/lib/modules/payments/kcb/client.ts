@@ -167,7 +167,7 @@ export class KCBClient {
         receipt: data.MpesaReceiptNumber,
         resultCode: data.ResultCode,
         resultDesc: data.ResultDesc,
-      } as PaymentStatus;
+      } as unknown as PaymentStatus;
     } catch (error) {
       if (error instanceof KCBPaymentError) {
         throw error;

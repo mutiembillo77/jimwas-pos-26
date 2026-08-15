@@ -34,7 +34,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
   const [searchTerm, setSearchTerm] = useState('');
   const [customerSearch, setCustomerSearch] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'cod' | 'kcb'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'mpesa' | 'cod' | 'kcb'>('cash');
   const [deliveryFeeType, setDeliveryFeeType] = useState<'none' | 'optional' | 'from_cbd'>('none');
   const deliveryFee = deliveryFeeType === 'optional' ? 100 : deliveryFeeType === 'from_cbd' ? 300 : 0;
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
@@ -162,7 +162,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
       if (savedCart && savedCart.items.length > 0) {
         setCart(savedCart.items);
         setSelectedCustomer(savedCart.selectedCustomer);
-        setSaleType(savedCart.saleType || 'standard');
+        setSaleType((savedCart.saleType as SaleType) || 'standard');
         setDepositAmount(savedCart.depositAmount || 0);
       }
     } catch (error) {

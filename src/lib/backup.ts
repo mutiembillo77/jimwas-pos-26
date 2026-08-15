@@ -273,7 +273,7 @@ export async function importBackup(
 
     // Import customers - mark as 'synced' since backup is trusted source
     if (backup.data.customers && Array.isArray(backup.data.customers)) {
-      for (const customer of backup.data.customers) {
+      for (const customer of backup.data.customers as Record<string, any>[]) {
         try {
           await saveCustomer({ ...customer, sync_status: 'synced' } as any);
           result.imported.customers++;
@@ -285,7 +285,7 @@ export async function importBackup(
 
     // Import products - mark as 'synced'
     if (backup.data.products && Array.isArray(backup.data.products)) {
-      for (const product of backup.data.products) {
+      for (const product of backup.data.products as Record<string, any>[]) {
         try {
           const existingBySku = product.sku ? await getProductBySku(product.sku) : undefined;
           const productToSave = existingBySku && existingBySku.id !== product.id
@@ -301,7 +301,7 @@ export async function importBackup(
 
     // Import transactions - mark as 'synced'
     if (backup.data.transactions && Array.isArray(backup.data.transactions)) {
-      for (const transaction of backup.data.transactions) {
+      for (const transaction of backup.data.transactions as Record<string, any>[]) {
         try {
           await saveTransaction({ ...transaction, sync_status: 'synced' } as any);
           result.imported.transactions++;
@@ -313,7 +313,7 @@ export async function importBackup(
 
     // Import installment plans - mark as 'synced'
     if (backup.data.installment_plans && Array.isArray(backup.data.installment_plans)) {
-      for (const plan of backup.data.installment_plans) {
+      for (const plan of backup.data.installment_plans as Record<string, any>[]) {
         try {
           await saveInstallmentPlan({ ...plan, sync_status: 'synced' } as any);
           result.imported.installment_plans++;
@@ -325,7 +325,7 @@ export async function importBackup(
 
     // Import installment payments - mark as 'synced'
     if (backup.data.installment_payments && Array.isArray(backup.data.installment_payments)) {
-      for (const payment of backup.data.installment_payments) {
+      for (const payment of backup.data.installment_payments as Record<string, any>[]) {
         try {
           await saveInstallmentPayment({ ...payment, sync_status: 'synced' } as any);
           result.imported.installment_payments++;
@@ -337,7 +337,7 @@ export async function importBackup(
 
     // Import loyalty transactions - mark as 'synced'
     if (backup.data.loyalty_transactions && Array.isArray(backup.data.loyalty_transactions)) {
-      for (const loyaltyTx of backup.data.loyalty_transactions) {
+      for (const loyaltyTx of backup.data.loyalty_transactions as Record<string, any>[]) {
         try {
           await saveLoyaltyTransaction({ ...loyaltyTx, sync_status: 'synced' } as any);
           result.imported.loyalty_transactions++;
@@ -349,7 +349,7 @@ export async function importBackup(
 
     // Import stock movements - mark as 'synced'
     if (backup.data.stock_movements && Array.isArray(backup.data.stock_movements)) {
-      for (const movement of backup.data.stock_movements) {
+      for (const movement of backup.data.stock_movements as Record<string, any>[]) {
         try {
           await saveStockMovement({ ...movement, sync_status: 'synced' } as any);
           result.imported.stock_movements++;
@@ -361,7 +361,7 @@ export async function importBackup(
 
     // Import suppliers - mark as 'synced'
     if (backup.data.suppliers && Array.isArray(backup.data.suppliers)) {
-      for (const supplier of backup.data.suppliers) {
+      for (const supplier of backup.data.suppliers as Record<string, any>[]) {
         try {
           await saveSupplier({ ...supplier, sync_status: 'synced' } as any);
           result.imported.suppliers++;
@@ -373,7 +373,7 @@ export async function importBackup(
 
     // Import deliveries - mark as 'synced'
     if (backup.data.deliveries && Array.isArray(backup.data.deliveries)) {
-      for (const delivery of backup.data.deliveries) {
+      for (const delivery of backup.data.deliveries as Record<string, any>[]) {
         try {
           await saveDelivery({ ...delivery, sync_status: 'synced' } as any);
           result.imported.deliveries++;
@@ -385,7 +385,7 @@ export async function importBackup(
 
     // Import stock adjustments - mark as 'synced'
     if (backup.data.stock_adjustments && Array.isArray(backup.data.stock_adjustments)) {
-      for (const adjustment of backup.data.stock_adjustments) {
+      for (const adjustment of backup.data.stock_adjustments as Record<string, any>[]) {
         try {
           await saveStockAdjustment({ ...adjustment, sync_status: 'synced' } as any);
           result.imported.stock_adjustments++;
@@ -397,7 +397,7 @@ export async function importBackup(
 
     // Import roles BEFORE users (roles are referenced by users via role_id foreign key) - mark as 'synced'
     if (backup.data.roles && Array.isArray(backup.data.roles)) {
-      for (const role of backup.data.roles) {
+      for (const role of backup.data.roles as Record<string, any>[]) {
         try {
           await saveRole({ ...role, sync_status: 'synced' } as any);
           result.imported.roles++;
@@ -409,7 +409,7 @@ export async function importBackup(
 
     // Import users (if option enabled) - must be after roles due to foreign key constraint - mark as 'synced'
     if (options.includeUsers && backup.data.users && Array.isArray(backup.data.users)) {
-      for (const user of backup.data.users) {
+      for (const user of backup.data.users as Record<string, any>[]) {
         try {
           await saveUser({ ...user, sync_status: 'synced' } as any);
           result.imported.users++;
@@ -421,7 +421,7 @@ export async function importBackup(
 
     // Import audit logs (if option enabled) - mark as 'synced'
     if (options.includeAuditLogs && backup.data.audit_logs && Array.isArray(backup.data.audit_logs)) {
-      for (const log of backup.data.audit_logs) {
+      for (const log of backup.data.audit_logs as Record<string, any>[]) {
         try {
           await saveAuditLog({ ...log, sync_status: 'synced' } as any);
           result.imported.audit_logs++;
@@ -433,7 +433,7 @@ export async function importBackup(
 
     // Import approval requests - mark as 'synced'
     if (backup.data.approval_requests && Array.isArray(backup.data.approval_requests)) {
-      for (const request of backup.data.approval_requests) {
+      for (const request of backup.data.approval_requests as Record<string, any>[]) {
         try {
           await saveApprovalRequest({ ...request, sync_status: 'synced' } as any);
           result.imported.approval_requests++;

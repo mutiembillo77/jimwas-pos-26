@@ -121,7 +121,7 @@ export function validateInvoiceNumber(invoiceNumber: string): boolean {
     return false;
   }
 
-  return /^[\w\-]+$/.test(invoiceNumber);
+  return /^[\w-]+$/.test(invoiceNumber);
 }
 
 /**
