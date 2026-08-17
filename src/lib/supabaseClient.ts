@@ -9,5 +9,9 @@ if (url && anonKey) {
   _supabase = createClient(url, anonKey);
 }
 
+export const isSupabaseConfigured = (): boolean => {
+  return Boolean(url && anonKey && _supabase);
+};
+
 export const supabase = _supabase;
 export default supabase;

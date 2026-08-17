@@ -973,13 +973,22 @@ export async function setSyncMetadata(key: string, value: string): Promise<void>
   await db.put('sync_metadata', { key, value });
 }
 
+// ============ OFFLINE AUTHENTICATION SNAPSHOT STORAGE ============
+// Snapshot is stored in IndexedDB 'sync_metadata' store.
+// Expiry is strictly set upon successful online authorization and never modified by offline transactions.
 const OFFLINE_AUTH_SNAPSHOT_KEY = 'active_offline_auth_snapshot';
 
+/**
+ * Persist an OfflineAuthSnapshot created during successful online authentication.
+ */
 export async function saveOfflineAuthSnapshot(snapshot: OfflineAuthSnapshot): Promise<void> {
   const db = await getDB();
   await db.put('sync_metadata', { key: OFFLINE_AUTH_SNAPSHOT_KEY, value: JSON.stringify(snapshot) });
 }
 
+/**
+ * Retrieve the active OfflineAuthSnapshot from IndexedDB.
+ */
 export async function getOfflineAuthSnapshot(): Promise<OfflineAuthSnapshot | null> {
   try {
     const db = await getDB();
@@ -991,6 +1000,9 @@ export async function getOfflineAuthSnapshot(): Promise<OfflineAuthSnapshot | nu
   }
 }
 
+/**
+ * Destroy the OfflineAuthSnapshot upon logout, session null, or authentication revocation.
+ */
 export async function clearOfflineAuthSnapshot(): Promise<void> {
   try {
     const db = await getDB();

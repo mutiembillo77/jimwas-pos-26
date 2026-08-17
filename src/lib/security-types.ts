@@ -299,6 +299,16 @@ export interface LoginHistory {
   sync_status: 'pending' | 'synced';
 }
 
+// ============ AUTHENTICATION BOUNDARY & OFFLINE SNAPSHOT ============
+
+/**
+ * Authentication state machine states:
+ * - 'loading': Initial state while verifying session authority.
+ * - 'online-authenticated': Supabase Auth responded with valid session + verified active POS profile. Snapshot refreshed.
+ * - 'offline-authorized': Network/transport unreachable + valid, unexpired (<=24h) OfflineAuthSnapshot + active local POS profile.
+ * - 'unauthenticated': No active session and no valid offline snapshot present.
+ * - 'auth-required': Supabase session null, revoked, expired, de-authenticated, or snapshot expired/corrupted. Offline fallback strictly forbidden.
+ */
 export type AuthState =
   | 'loading'
   | 'online-authenticated'
@@ -306,6 +316,16 @@ export type AuthState =
   | 'unauthenticated'
   | 'auth-required';
 
+/**
+ * 24-Hour Offline Operational Authorization Snapshot.
+ *
+ * Invariants:
+ * 1. Authority: Only created upon successful online Supabase authentication + active POS profile.
+ * 2. Lifetime: Fixed maximum 24 hours (OFFLINE_AUTH_MAX_AGE_MS) from last successful online authorization.
+ * 3. Non-Extensibility: Offline POS usage NEVER extends expiresAt.
+ * 4. Invalidation: Purged immediately if Supabase responds with session === null, an auth error, or explicit logout.
+ * 5. Security: Never contains passwords, password hashes, or Supabase access/refresh tokens.
+ */
 export interface OfflineAuthSnapshot {
   userId: string;
   authUserId: string;

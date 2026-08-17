@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import type { User } from '../lib/security-types';
 import { getCurrentUser, login as authLogin, logout as authLogout, initializeSecurity, requestPasswordReset, resendConfirmationEmail } from '../lib/auth';
+import { clearOfflineAuthSnapshot } from '../lib/db';
 import { clearAllPermissionCache } from '../lib/permissions';
 import { initializeApp, shouldAutoRestore } from '../lib/init';
 import { supabase } from '../lib/supabaseClient';
@@ -72,6 +73,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (supabase) {
       const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_OUT' || !session) {
+          // Explicit signout or missing session invalidates local authorization snapshot
+          await clearOfflineAuthSnapshot();
           if (isMounted) {
             setUser(null);
             clearAllPermissionCache();
@@ -191,7 +194,7 @@ export function PermissionGuard({ permission, requireAll = false, children, fall
 
 // Role Guard component
 interface RoleGuardProps {
-  allowedRoles: Array<'admin' | 'manager' | 'cashier'>;
+  allowedRoles: Array<RoleCode>;
   children: ReactNode;
   fallback?: ReactNode;
 }

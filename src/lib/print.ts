@@ -188,7 +188,7 @@ export function resolvePaymentAccountDetails(transaction: {
   };
 }
 
-function buildReceiptHtml(options: PrintOptions): string {
+export function buildReceiptHtml(options: PrintOptions): string {
   const { business, receipt, transaction } = options;
 
   /*
