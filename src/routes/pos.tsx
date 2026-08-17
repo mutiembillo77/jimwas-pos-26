@@ -65,23 +65,8 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
   const [saleType, setSaleType] = useState<SaleType>('standard');
   const [depositAmount, setDepositAmount] = useState(0);
 
-  // Handle KCB BUNI STK Push
-  const handleKCBSTKPayment = async () => {
-    // Offline protection rule: M-Pesa STK Push requires an active internet connection
-    if (!navigator.onLine || !getOnlineStatus()) {
-      setKCBStatus('failed');
-      setKCBError('M-Pesa payments require an internet connection. Please reconnect and try again.');
-      return;
-    }
-
-    // In production, require full configuration; in sandbox, allow testing without credentials
-    if (kcbEnvironment !== 'sandbox' && !kcbConfigured) {
-      setKCBStatus('failed');
-      setKCBError('KCB Payment is not properly configured.');
-      return;
-    }
-
   // Receipt printing state
+
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(null);
   const [showReceiptHistory, setShowReceiptHistory] = useState(false);
 
