@@ -11,6 +11,7 @@ import type {
   PriceChangeHistory,
   VoidRequest,
   RefundRequest,
+  OfflineAuthSnapshot,
 } from './security-types';
 import type {
   BusinessSettings,
@@ -251,7 +252,7 @@ interface POSDatabase extends DBSchema {
   users: {
     key: string;
     value: User;
-    indexes: { 'by-username': string; 'by-email': string; 'by-role': string };
+    indexes: { 'by-username': string; 'by-email': string; 'by-role': string; 'by-auth-user-id'?: string };
   };
   roles: {
     key: string;
@@ -437,7 +438,7 @@ export interface TransactionItem {
 }
 
 const DB_NAME = 'pos-offline-db';
-const DB_VERSION = 10;
+const DB_VERSION = 11;
 
 let dbInstance: IDBPDatabase<POSDatabase> | null = null;
 
@@ -445,7 +446,14 @@ export async function getDB(): Promise<IDBPDatabase<POSDatabase>> {
   if (dbInstance) return dbInstance;
 
   dbInstance = await openDB<POSDatabase>(DB_NAME, DB_VERSION, {
-    upgrade(db) {
+    upgrade(db, oldVersion, newVersion, transaction) {
+      if (oldVersion < 11 && db.objectStoreNames.contains('users')) {
+        const userStore = transaction.objectStore('users');
+        if (!userStore.indexNames.contains('by-auth-user-id')) {
+          userStore.createIndex('by-auth-user-id', 'auth_user_id');
+        }
+      }
+
       // Customers store
       if (!db.objectStoreNames.contains('customers')) {
         const customerStore = db.createObjectStore('customers', { keyPath: 'id' });
@@ -965,6 +973,33 @@ export async function setSyncMetadata(key: string, value: string): Promise<void>
   await db.put('sync_metadata', { key, value });
 }
 
+const OFFLINE_AUTH_SNAPSHOT_KEY = 'active_offline_auth_snapshot';
+
+export async function saveOfflineAuthSnapshot(snapshot: OfflineAuthSnapshot): Promise<void> {
+  const db = await getDB();
+  await db.put('sync_metadata', { key: OFFLINE_AUTH_SNAPSHOT_KEY, value: JSON.stringify(snapshot) });
+}
+
+export async function getOfflineAuthSnapshot(): Promise<OfflineAuthSnapshot | null> {
+  try {
+    const db = await getDB();
+    const item = await db.get('sync_metadata', OFFLINE_AUTH_SNAPSHOT_KEY);
+    if (!item?.value) return null;
+    return JSON.parse(item.value) as OfflineAuthSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearOfflineAuthSnapshot(): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.delete('sync_metadata', OFFLINE_AUTH_SNAPSHOT_KEY);
+  } catch {
+    // Non-blocking
+  }
+}
+
 // ============ SECURITY STORE OPERATIONS ============
 
 // User operations
@@ -986,6 +1021,18 @@ export async function getUserByUsername(username: string): Promise<User | undefi
 export async function getUserByEmail(email: string): Promise<User | undefined> {
   const db = await getDB();
   return db.getFromIndex('users', 'by-email', email);
+}
+
+export async function getUserByAuthUserId(authUserId: string): Promise<User | undefined> {
+  const db = await getDB();
+  try {
+    const user = await db.getFromIndex('users', 'by-auth-user-id' as any, authUserId);
+    if (user) return user;
+  } catch {
+    // Fallback if index query fails or is pending
+  }
+  const allUsers = await getAllUsers();
+  return allUsers.find(u => u.auth_user_id === authUserId);
 }
 
 export async function getAllUsers(): Promise<User[]> {

@@ -132,9 +132,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<RoleCode, string[]> = {
 
 export interface User {
   id: string;
+  auth_user_id?: string;
   username: string;
   email: string;
-  password_hash: string;
+  password_hash?: string;
   full_name: string;
   role_id: string;
   role_code: RoleCode;
@@ -298,6 +299,28 @@ export interface LoginHistory {
   sync_status: 'pending' | 'synced';
 }
 
+export type AuthState =
+  | 'loading'
+  | 'online-authenticated'
+  | 'offline-authorized'
+  | 'unauthenticated'
+  | 'auth-required';
+
+export interface OfflineAuthSnapshot {
+  userId: string;
+  authUserId: string;
+  username: string;
+  fullName: string;
+  roleCode: RoleCode;
+  roleId: string;
+  branchId?: string;
+  branchName?: string;
+  permissions: string[];
+  authorizedAt: string;
+  lastOnlineAt: string;
+  expiresAt: string;
+}
+
 // ============ SECURITY EVENTS ============
 
 export type SecurityEventSeverity = 'low' | 'medium' | 'high' | 'critical';
@@ -311,7 +334,15 @@ export type SecurityEventType =
   | 'FREQUENT_PRICE_CHANGES'
   | 'OFFLINE_DATA_SYNC_ANOMALY'
   | 'PERMISSION_ESCALATION_ATTEMPT'
-  | 'UNAUTHORIZED_ACCESS_ATTEMPT';
+  | 'UNAUTHORIZED_ACCESS_ATTEMPT'
+  | 'ONLINE_LOGIN'
+  | 'ONLINE_LOGOUT'
+  | 'OFFLINE_AUTH_GRANTED'
+  | 'OFFLINE_AUTH_EXPIRED'
+  | 'OFFLINE_AUTH_REJECTED'
+  | 'ACCOUNT_REVOKED'
+  | 'BLOCKED_PRIVILEGED_OFFLINE_ACTION'
+  | 'ONLINE_REAUTHORIZATION_SUCCESS';
 
 export interface SecurityEvent {
   id: string;

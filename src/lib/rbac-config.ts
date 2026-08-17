@@ -1,6 +1,6 @@
 // RBAC Configuration - Complete role hierarchy and permissions matrix
 
-import { RoleCode } from './security-types';
+import { RoleCode, AuthState } from './security-types';
 
 // Route access control configuration
 export interface RouteConfig {
@@ -8,6 +8,7 @@ export interface RouteConfig {
   allowedRoles: RoleCode[];
   permissions?: string[]; // Additional permission checks beyond role
   requiresApproval?: boolean;
+  requiresOnline?: boolean; // Security boundary: sensitive operations require active online Supabase Auth session
   description: string;
 }
 
@@ -16,6 +17,7 @@ export interface FeatureConfig {
   featureName: string;
   requiredPermissions: string[];
   allowedRoles: RoleCode[];
+  requiresOnline?: boolean;
   description: string;
 }
 
@@ -24,12 +26,13 @@ export interface ComponentConfig {
   componentName: string;
   allowedRoles: RoleCode[];
   requiredPermissions?: string[];
+  requiresOnline?: boolean;
   description: string;
 }
 
 // Complete route access matrix
 export const ROUTE_CONFIG: Record<string, RouteConfig> = {
-  // Core POS
+  // Core POS (Approved for Offline)
   'pos': {
     path: '/pos',
     allowedRoles: ['admin', 'administrator', 'manager', 'cashier'],
@@ -37,7 +40,7 @@ export const ROUTE_CONFIG: Record<string, RouteConfig> = {
     description: 'POS Terminal - Create and process sales',
   },
 
-  // Customers
+  // Customers (Approved for Offline)
   'customers': {
     path: '/customers',
     allowedRoles: ['admin', 'administrator', 'manager', 'cashier'],
@@ -45,7 +48,7 @@ export const ROUTE_CONFIG: Record<string, RouteConfig> = {
     description: 'Customer Management',
   },
 
-  // Products & Inventory
+  // Products & Inventory (Approved for Offline)
   'products': {
     path: '/products',
     allowedRoles: ['admin', 'manager'],
@@ -67,7 +70,7 @@ export const ROUTE_CONFIG: Record<string, RouteConfig> = {
     description: 'Installment Plans',
   },
 
-  // Dashboard & Analytics
+  // Dashboard & Analytics (Approved for Offline viewing of cached transactions)
   'dashboard': {
     path: '/dashboard',
     allowedRoles: ['admin', 'manager'],
@@ -107,7 +110,7 @@ export const ROUTE_CONFIG: Record<string, RouteConfig> = {
     description: 'Promotion and offer rule management',
   },
 
-  // Transactions
+  // Transactions (Approved for Offline)
   'transactions': {
     path: '/transactions',
     allowedRoles: ['admin', 'administrator', 'manager', 'cashier'],
@@ -124,11 +127,13 @@ export const ROUTE_CONFIG: Record<string, RouteConfig> = {
     description: 'Void Request Approvals',
   },
 
+  // Sensitive Security and System Administration (STRICTLY REQUIRE ONLINE AUTHENTICATION)
   'security': {
     path: '/security',
     allowedRoles: ['admin'],
     permissions: ['users.manage', 'users.view', 'security.view'],
-    description: 'Security Dashboard - User & Role Management',
+    requiresOnline: true,
+    description: 'Security Dashboard - User & Role Management (Online Only)',
   },
 
   'audit': {
@@ -142,21 +147,24 @@ export const ROUTE_CONFIG: Record<string, RouteConfig> = {
     path: '/settings',
     allowedRoles: ['admin', 'manager'],
     permissions: ['settings.view', 'settings.edit'],
-    description: 'System Settings',
+    requiresOnline: true,
+    description: 'System Settings & Payment Credentials (Online Only)',
   },
 
   'backup': {
     path: '/backup',
     allowedRoles: ['admin'],
     permissions: ['settings.edit'],
-    description: 'Backup & Restore',
+    requiresOnline: true,
+    description: 'Backup & Restore (Online Only)',
   },
 
   'populate-db': {
     path: '/populate-db',
     allowedRoles: ['admin'],
     permissions: ['settings.edit'],
-    description: 'Database Population (Dev Only)',
+    requiresOnline: true,
+    description: 'Database Population (Online Only)',
   },
 };
 
@@ -206,11 +214,12 @@ export const FEATURE_CONFIG: Record<string, FeatureConfig> = {
     description: 'Change product prices',
   },
 
-  // User Management
+  // User Management (Online Only)
   'MANAGE_USERS': {
     featureName: 'Manage Users',
     requiredPermissions: ['users.manage'],
     allowedRoles: ['admin'],
+    requiresOnline: true,
     description: 'Create, edit, delete users',
   },
 
@@ -218,6 +227,7 @@ export const FEATURE_CONFIG: Record<string, FeatureConfig> = {
     featureName: 'Manage Roles',
     requiredPermissions: ['users.manage'],
     allowedRoles: ['admin'],
+    requiresOnline: true,
     description: 'Manage roles and permissions',
   },
 
@@ -248,6 +258,7 @@ export const FEATURE_CONFIG: Record<string, FeatureConfig> = {
     featureName: 'Manage Finance',
     requiredPermissions: ['finance.manage'],
     allowedRoles: ['admin'],
+    requiresOnline: true,
     description: 'Manage financial settings',
   },
 
@@ -286,6 +297,7 @@ export const FEATURE_CONFIG: Record<string, FeatureConfig> = {
     featureName: 'Edit Settings',
     requiredPermissions: ['settings.edit'],
     allowedRoles: ['admin'],
+    requiresOnline: true,
     description: 'Edit system settings',
   },
 };
@@ -339,6 +351,7 @@ export const COMPONENT_CONFIG: Record<string, ComponentConfig> = {
     componentName: 'Security Navigation',
     allowedRoles: ['admin'],
     requiredPermissions: ['users.manage'],
+    requiresOnline: true,
     description: 'Show Security in navigation',
   },
 
@@ -353,6 +366,7 @@ export const COMPONENT_CONFIG: Record<string, ComponentConfig> = {
     componentName: 'Settings Navigation',
     allowedRoles: ['admin', 'manager'],
     requiredPermissions: ['settings.view'],
+    requiresOnline: true,
     description: 'Show Settings in navigation',
   },
 
@@ -410,6 +424,7 @@ export const COMPONENT_CONFIG: Record<string, ComponentConfig> = {
     componentName: 'User Management Component',
     allowedRoles: ['admin'],
     requiredPermissions: ['users.manage'],
+    requiresOnline: true,
     description: 'Show user management controls',
   },
 
@@ -417,26 +432,30 @@ export const COMPONENT_CONFIG: Record<string, ComponentConfig> = {
     componentName: 'Role Management Component',
     allowedRoles: ['admin'],
     requiredPermissions: ['users.manage'],
+    requiresOnline: true,
     description: 'Show role management controls',
   },
 };
 
 // Helper functions
-export function canAccessRoute(roleCode: RoleCode, routePath: string): boolean {
+export function canAccessRoute(roleCode: RoleCode, routePath: string, authState?: AuthState): boolean {
   const route = Object.values(ROUTE_CONFIG).find(r => r.path === routePath);
   if (!route) return false;
+  if (route.requiresOnline && authState === 'offline-authorized') return false;
   return route.allowedRoles.includes(roleCode);
 }
 
-export function canUseFeature(roleCode: RoleCode, featureName: string): boolean {
+export function canUseFeature(roleCode: RoleCode, featureName: string, authState?: AuthState): boolean {
   const feature = FEATURE_CONFIG[featureName];
   if (!feature) return false;
+  if (feature.requiresOnline && authState === 'offline-authorized') return false;
   return feature.allowedRoles.includes(roleCode);
 }
 
-export function canRenderComponent(roleCode: RoleCode, componentName: string): boolean {
+export function canRenderComponent(roleCode: RoleCode, componentName: string, authState?: AuthState): boolean {
   const component = COMPONENT_CONFIG[componentName];
   if (!component) return false;
+  if (component.requiresOnline && authState === 'offline-authorized') return false;
   return component.allowedRoles.includes(roleCode);
 }
 
@@ -453,16 +472,25 @@ export function getComponentConfig(componentName: string): ComponentConfig | und
 }
 
 // Get all routes available to a role
-export function getAccessibleRoutes(roleCode: RoleCode): RouteConfig[] {
-  return Object.values(ROUTE_CONFIG).filter(r => r.allowedRoles.includes(roleCode));
+export function getAccessibleRoutes(roleCode: RoleCode, authState?: AuthState): RouteConfig[] {
+  return Object.values(ROUTE_CONFIG).filter(r => {
+    if (r.requiresOnline && authState === 'offline-authorized') return false;
+    return r.allowedRoles.includes(roleCode);
+  });
 }
 
 // Get all features available to a role
-export function getAvailableFeatures(roleCode: RoleCode): FeatureConfig[] {
-  return Object.values(FEATURE_CONFIG).filter(f => f.allowedRoles.includes(roleCode));
+export function getAvailableFeatures(roleCode: RoleCode, authState?: AuthState): FeatureConfig[] {
+  return Object.values(FEATURE_CONFIG).filter(f => {
+    if (f.requiresOnline && authState === 'offline-authorized') return false;
+    return f.allowedRoles.includes(roleCode);
+  });
 }
 
 // Get all components that should be visible to a role
-export function getVisibleComponents(roleCode: RoleCode): ComponentConfig[] {
-  return Object.values(COMPONENT_CONFIG).filter(c => c.allowedRoles.includes(roleCode));
+export function getVisibleComponents(roleCode: RoleCode, authState?: AuthState): ComponentConfig[] {
+  return Object.values(COMPONENT_CONFIG).filter(c => {
+    if (c.requiresOnline && authState === 'offline-authorized') return false;
+    return c.allowedRoles.includes(roleCode);
+  });
 }

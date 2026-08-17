@@ -68,6 +68,11 @@ export function maskPhoneNumber(phone?: string | null): string | null {
   const digits = trimmed.replace(/\D/g, '');
   if (digits.length === 0) return null;
 
+  // Short digits fallback - safe redaction (never exposes raw digits)
+  if (digits.length <= 4) {
+    return 'XXXX';
+  }
+
   // 12-digit Kenyan numbers starting with 254 (e.g. +254712345678 or 254712345678)
   if (digits.length === 12 && digits.startsWith('254')) {
     const localNine = digits.slice(3);
@@ -83,15 +88,11 @@ export function maskPhoneNumber(phone?: string | null): string | null {
     return `${prefix}XXXXXX${lastTwo}`;
   }
 
-  // General fallback preserving first 2 and last 2 characters
-  if (digits.length > 4) {
-    const prefix = digits.slice(0, 2);
-    const lastTwo = digits.slice(-2);
-    const maskLen = Math.max(1, digits.length - 4);
-    return `${hasPlus ? '+' : ''}${prefix}${'X'.repeat(maskLen)}${lastTwo}`;
-  }
-
-  return `${digits.slice(0, 1)}X${digits.slice(-1)}`;
+  // General fallback preserving first 2 and last 2 characters with middle X's
+  const prefix = digits.slice(0, 2);
+  const lastTwo = digits.slice(-2);
+  const maskLen = Math.max(1, digits.length - 4);
+  return `${hasPlus ? '+' : ''}${prefix}${'X'.repeat(maskLen)}${lastTwo}`;
 }
 
 /**
@@ -757,9 +758,13 @@ export function saveReceiptToHistory(
     );
 
     /*
-     * Newest transaction first.
+     * Newest transaction first. Mask customer phone to ensure local history preserves privacy.
      */
-    history.unshift(transaction);
+    const sanitizedTransaction: PrintTransaction = {
+      ...transaction,
+      customer_phone: maskPhoneNumber(transaction.customer_phone) || undefined,
+    };
+    history.unshift(sanitizedTransaction);
 
     /*
      * Prevent unlimited localStorage growth.

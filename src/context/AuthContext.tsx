@@ -2,17 +2,20 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import type { User } from '../lib/security-types';
-import { getCurrentUser, login as authLogin, logout as authLogout, initializeSecurity } from '../lib/auth';
+import { getCurrentUser, login as authLogin, logout as authLogout, initializeSecurity, requestPasswordReset, resendConfirmationEmail } from '../lib/auth';
 import { clearAllPermissionCache } from '../lib/permissions';
 import { initializeApp, shouldAutoRestore } from '../lib/init';
+import { supabase } from '../lib/supabaseClient';
 
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (identifier: string, password: string) => Promise<{ success: boolean; error?: string; isEmailUnconfirmed?: boolean; unconfirmedEmail?: string }>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<{ success: boolean; error?: string }>;
+  resendConfirmationEmail: (email: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -22,6 +25,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    let isMounted = true;
+
     async function init() {
       try {
         // Initialization is best-effort and must never keep the preview blocked.
@@ -31,50 +36,77 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ]);
 
         // Check if we should auto-restore from last backup
-        const needsRestore = await Promise.race([
+        await Promise.race([
           shouldAutoRestore(),
           new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1500)),
         ]);
-        if (needsRestore) {
-          console.log('[v0] Auto-restoring backup data from previous session...');
-          // Note: Actual restore logic happens in backup module on-demand
-          // This is just a signal that data should be available from IndexedDB
-        }
 
-        // Initialize security data (roles, permissions, admin user) without blocking indefinitely.
+        // Initialize security data (roles, permissions) without blocking indefinitely.
         await Promise.race([
           initializeSecurity(),
           new Promise<void>((resolve) => setTimeout(resolve, 2500)),
         ]);
 
-        // Get current session
+        // Get current Supabase Auth user and POS profile
         const currentUser = await Promise.race([
           getCurrentUser(),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
         ]);
-        setUser(currentUser);
+
+        if (isMounted) {
+          setUser(currentUser);
+        }
       } catch (error) {
         console.error('Auth init error:', error);
-        // Ensure the app still renders even if IndexedDB/Supabase init fails
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     }
 
     void init();
+
+    // Subscribe to Supabase Auth state changes
+    let authSubscription: { unsubscribe: () => void } | null = null;
+    if (supabase) {
+      const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'SIGNED_OUT' || !session) {
+          if (isMounted) {
+            setUser(null);
+            clearAllPermissionCache();
+          }
+        } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+          const freshUser = await getCurrentUser();
+          if (isMounted) {
+            setUser(freshUser);
+            clearAllPermissionCache();
+          }
+        }
+      });
+      authSubscription = data.subscription;
+    }
+
     const loadingFallback = window.setTimeout(() => {
-      console.warn('[v0] Auth initialization exceeded the preview startup budget; showing login.');
-      setIsLoading(false);
-    }, 6000);
-    return () => window.clearTimeout(loadingFallback);
+      if (isMounted && isLoading) {
+        setIsLoading(false);
+      }
+    }, 5000);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(loadingFallback);
+      authSubscription?.unsubscribe();
+    };
   }, []);
 
-  const login = async (username: string, password: string) => {
-    const result = await authLogin(username, password);
+  const login = async (identifier: string, password: string) => {
+    const result = await authLogin(identifier, password);
     if (result.success && result.user) {
       setUser(result.user);
+      clearAllPermissionCache();
     }
-    return { success: result.success, error: result.error };
+    return result;
   };
 
   const logout = async () => {
@@ -86,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshUser = async () => {
     const currentUser = await getCurrentUser();
     setUser(currentUser);
+    clearAllPermissionCache();
   };
 
   return (
@@ -97,6 +130,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         logout,
         refreshUser,
+        requestPasswordReset,
+        resendConfirmationEmail,
       }}
     >
       {children}

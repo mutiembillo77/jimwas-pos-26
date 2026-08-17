@@ -12,6 +12,15 @@ export async function getUserPermissions(userId: string): Promise<Set<string>> {
   const cached = permissionCache.get(userId);
   if (cached) return cached;
 
+  // Check if offline snapshot has permissions for this user
+  const { getOfflineAuthSnapshot } = await import('./db');
+  const snapshot = await getOfflineAuthSnapshot();
+  if (snapshot && snapshot.userId === userId && Array.isArray(snapshot.permissions)) {
+    const permissionNames = new Set<string>(snapshot.permissions);
+    permissionCache.set(userId, permissionNames);
+    return permissionNames;
+  }
+
   const user = await getUser(userId);
   if (!user) return new Set();
 

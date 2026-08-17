@@ -306,7 +306,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
     try {
       const result = await initiateKCBSTKPush(formattedPhone, cartTotal, {
         cashierId: user?.id,
-        cashierName: user?.name,
+        cashierName: user?.full_name || user?.username,
         accountReference: `POS-${Date.now()}`,
         transactionDesc: 'KCB BUNI STK Push Payment',
       });
@@ -578,7 +578,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
               created_at: transaction.created_at,
               customer_name: selectedCustomer?.name,
               customer_phone: selectedCustomer?.phone,
-              cashier_name: user?.name,
+              cashier_name: user?.full_name || user?.username,
               mpesa_receipt: kcbReceiptNumber || undefined,
             };
             
@@ -1127,10 +1127,10 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
                                     change_amount: transaction.change_amount,
                                     payment_method: transaction.payment_method,
                                     created_at: transaction.created_at,
-                                    customer_name: selectedCustomer?.name || transaction.customer_name,
-                                    customer_phone: selectedCustomer?.phone || transaction.customer_phone,
-                                    cashier_name: user?.name,
-                                    mpesa_receipt: transaction.mpesa_receipt,
+                                    customer_name: selectedCustomer?.name || (transaction as any).customer_name,
+                                    customer_phone: selectedCustomer?.phone || (transaction as any).customer_phone,
+                                    cashier_name: user?.full_name || user?.username,
+                                    mpesa_receipt: (transaction as any).mpesa_receipt,
                                   },
                                 });
                                 toast.show('Receipt sent to printer');

@@ -1,78 +1,25 @@
 // Authentication Service for Jimwas POS
-// Handles login, logout, session management, and password operations
+// Uses Supabase Auth as the primary identity provider while managing POS profile, RBAC, and offline operational boundaries
 
-import { generateId, saveUser, getUserByUsername, getUser, saveLoginHistory } from './db';
-import type { User, RoleCode } from './security-types';
+import { generateId, saveUser, getUserByUsername, getUserByEmail, getUserByAuthUserId, getUser, saveLoginHistory, saveOfflineAuthSnapshot, getOfflineAuthSnapshot, clearOfflineAuthSnapshot } from './db';
+import type { User, RoleCode, AuthState, OfflineAuthSnapshot, SecurityEventType } from './security-types';
 import { getRoleByCode } from './db';
+import { supabase } from './supabaseClient';
 
-// Session storage keys
-const SESSION_KEY = 'pos_session';
-const CURRENT_USER_KEY = 'pos_current_user';
+// Configurable offline authorization duration: 24 hours from last successful online authorization
+export const OFFLINE_AUTH_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-// Lockout configuration
-const MAX_FAILED_ATTEMPTS = 5;
-const LOCKOUT_DURATION_MINUTES = 30;
-
-// Secure password hashing using PBKDF2 with random salt
-// This provides strong protection against rainbow table and brute force attacks
-async function hashPassword(password: string, existingHash?: string): Promise<string> {
-  const encoder = new TextEncoder();
-
-  // Extract salt from existing hash or generate new one
-  let salt: Uint8Array;
-  if (existingHash) {
-    const saltHex = existingHash.split(':')[0];
-    salt = new Uint8Array(saltHex.match(/.{2}/g)!.map(b => parseInt(b, 16)));
-  } else {
-    salt = crypto.getRandomValues(new Uint8Array(32));
-  }
-
-  // Use PBKDF2 with 100,000 iterations for strong key derivation
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(password),
-    { name: 'PBKDF2' },
-    false,
-    ['deriveBits']
-  );
-
-  // deriveBits returns the hash bytes directly, avoiding extractability restrictions
-  // that apply when a PBKDF2-derived CryptoKey is exported.
-  const derivedBits = await crypto.subtle.deriveBits(
-    {
-      name: 'PBKDF2',
-      salt: salt.slice().buffer as ArrayBuffer,
-      iterations: 100000,
-      hash: 'SHA-256',
-    },
-    keyMaterial,
-    256
-  );
-  const hashArray = Array.from(new Uint8Array(derivedBits));
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
-
-  return `${saltHex}:${hashHex}`;
-}
-
-async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  // Check for legacy hash format (no colon separator - old SHA256 format)
-  if (!hash.includes(':')) {
-    // Legacy verification for backward compatibility
-    const encoder = new TextEncoder();
-    const data = encoder.encode(password + 'jimwas_pos_salt_2024');
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const computedHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    return computedHash === hash;
-  }
-
-  // New PBKDF2 format: salt:hash
-  const computedHash = await hashPassword(password, hash);
-  return computedHash === hash;
+export interface LoginResult {
+  success: boolean;
+  error?: string;
+  user?: User;
+  snapshot?: OfflineAuthSnapshot;
+  isEmailUnconfirmed?: boolean;
+  unconfirmedEmail?: string;
 }
 
 function getDeviceInfo(): string {
+  if (typeof navigator === 'undefined') return 'Unknown';
   const ua = navigator.userAgent;
   const browser = ua.includes('Chrome') ? 'Chrome' :
                   ua.includes('Firefox') ? 'Firefox' :
@@ -86,314 +33,492 @@ function getDeviceInfo(): string {
   return `${browser} on ${os}`;
 }
 
-export interface LoginResult {
-  success: boolean;
-  error?: string;
-  user?: User;
-  requiresPasswordChange?: boolean;
-}
-
-export interface SessionData {
-  userId: string;
-  token: string;
-  loginAt: string;
-  deviceInfo: string;
-}
-
-// Get current session
-export function getCurrentSession(): SessionData | null {
-  const sessionStr = localStorage.getItem(SESSION_KEY);
-  if (!sessionStr) return null;
+/**
+ * Capture an offline authorization snapshot for a successfully authenticated user.
+ * Note: Never contains passwords, password hashes, or Supabase access tokens.
+ */
+export async function recordOfflineAuthSnapshot(user: User): Promise<OfflineAuthSnapshot | null> {
   try {
-    return JSON.parse(sessionStr);
-  } catch {
+    const { getUserPermissions } = await import('./permissions');
+    const permsSet = await getUserPermissions(user.id);
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + OFFLINE_AUTH_MAX_AGE_MS).toISOString();
+
+    const snapshot: OfflineAuthSnapshot = {
+      userId: user.id,
+      authUserId: user.auth_user_id || '',
+      username: user.username,
+      fullName: user.full_name,
+      roleCode: user.role_code,
+      roleId: user.role_id,
+      branchId: user.branch_id,
+      branchName: user.branch_name,
+      permissions: Array.from(permsSet),
+      authorizedAt: now.toISOString(),
+      lastOnlineAt: now.toISOString(),
+      expiresAt,
+    };
+
+    await saveOfflineAuthSnapshot(snapshot);
+    await logSecurityEvent('OFFLINE_AUTH_GRANTED', user.id, `Offline authorization granted until ${expiresAt}`);
+    return snapshot;
+  } catch (error) {
+    console.warn('[v0] Failed to record offline auth snapshot:', error);
     return null;
   }
 }
 
-// Get current user from session
-export async function getCurrentUser(): Promise<User | null> {
-  const session = getCurrentSession();
-  if (!session) return null;
-
-  const user = await getUser(session.userId);
-  if (!user || !user.is_active) {
-    clearSession();
-    return null;
+/**
+ * Validate the stored offline authorization snapshot.
+ * Verifies that the snapshot exists, has not expired, and belongs to an active POS user.
+ */
+export async function validateOfflineAuthSnapshot(): Promise<{
+  valid: boolean;
+  snapshot?: OfflineAuthSnapshot;
+  user?: User;
+  reason?: string;
+}> {
+  const snapshot = await getOfflineAuthSnapshot();
+  if (!snapshot) {
+    return { valid: false, reason: 'No offline authorization snapshot found' };
   }
 
+  if (!snapshot.userId || !snapshot.authUserId || !snapshot.roleCode) {
+    await clearOfflineAuthSnapshot();
+    await logSecurityEvent('OFFLINE_AUTH_REJECTED', undefined, 'Corrupted offline authorization snapshot discarded');
+    return { valid: false, reason: 'Offline authorization snapshot is corrupted' };
+  }
+
+  const now = Date.now();
+  const expiry = new Date(snapshot.expiresAt).getTime();
+
+  if (isNaN(expiry) || now >= expiry) {
+    await logSecurityEvent('OFFLINE_AUTH_EXPIRED', snapshot.userId, `Offline authorization window expired at ${snapshot.expiresAt}`);
+    await clearOfflineAuthSnapshot();
+    return { valid: false, reason: 'Offline authorization period has expired (24-hour limit reached). Online connection required.' };
+  }
+
+  const user = await getUser(snapshot.userId);
+  if (!user || !user.is_active) {
+    await clearOfflineAuthSnapshot();
+    await logSecurityEvent('ACCOUNT_REVOKED', snapshot.userId, 'POS profile is inactive or missing during offline validation');
+    return { valid: false, reason: 'Associated POS employee profile is inactive or removed' };
+  }
+
+  return { valid: true, snapshot, user };
+}
+
+/**
+ * Resolve identifier (email or username) to the corresponding email address.
+ * Uses a secure RPC get_auth_email_for_username if connected to Supabase,
+ * or local cached records without exposing emails broadly.
+ */
+async function resolveEmail(identifier: string): Promise<string | null> {
+  const trimmed = identifier.trim();
+  if (!trimmed) return null;
+
+  // If already an email, return as-is
+  if (trimmed.includes('@')) {
+    return trimmed;
+  }
+
+  // Attempt RPC resolution on Supabase
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.rpc('get_auth_email_for_username', {
+        p_username: trimmed,
+      });
+      if (!error && typeof data === 'string' && data.length > 0) {
+        return data;
+      }
+    } catch {
+      // Fall through to local fallback
+    }
+  }
+
+  // Fallback to locally cached user record by username
+  try {
+    const localUser = await getUserByUsername(trimmed);
+    if (localUser?.email) {
+      return localUser.email;
+    }
+  } catch {
+    // Ignore local lookup errors
+  }
+
+  return null;
+}
+
+/**
+ * Authenticate using Supabase Auth.
+ * Passwords are never verified against local hashes.
+ */
+export async function login(identifier: string, password: string): Promise<LoginResult> {
+  if (!supabase) {
+    return {
+      success: false,
+      error: 'Supabase client is not configured. Please check environment variables (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY).',
+    };
+  }
+
+  const email = await resolveEmail(identifier);
+  if (!email) {
+    await logLoginAttempt('', identifier, false, 'Invalid identifier or user not found');
+    return { success: false, error: 'Invalid email/username or password.' };
+  }
+
+  try {
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (authError) {
+      const msg = authError.message.toLowerCase();
+      if (msg.includes('email not confirmed') || (authError.status === 400 && msg.includes('confirm'))) {
+        await logLoginAttempt('', email, false, 'Email not confirmed');
+        return {
+          success: false,
+          error: 'Email address has not been confirmed. Please check your inbox for the confirmation link.',
+          isEmailUnconfirmed: true,
+          unconfirmedEmail: email,
+        };
+      }
+
+      if (msg.includes('invalid login credentials') || msg.includes('invalid credentials') || msg.includes('user not found')) {
+        await logLoginAttempt('', email, false, 'Invalid credentials');
+        return { success: false, error: 'Invalid email or password.' };
+      }
+
+      await logLoginAttempt('', email, false, authError.message);
+      return { success: false, error: authError.message || 'Login failed. Please try again.' };
+    }
+
+    if (!authData.user) {
+      return { success: false, error: 'Authentication returned no active user.' };
+    }
+
+    const authUserId = authData.user.id;
+    const authUserEmail = authData.user.email || email;
+
+    // Retrieve POS user profile linked to this Supabase Auth identity
+    let posUser = await getUserByAuthUserId(authUserId);
+
+    // If not found by auth_user_id, try finding by email and link it
+    if (!posUser) {
+      posUser = await getUserByEmail(authUserEmail);
+      if (posUser) {
+        posUser.auth_user_id = authUserId;
+        posUser.updated_at = new Date().toISOString();
+        await saveUser(posUser);
+
+        // Also update Supabase public.users table if accessible
+        try {
+          await supabase.from('users').update({ auth_user_id: authUserId }).eq('id', posUser.id);
+        } catch {
+          // Non-critical if offline
+        }
+      }
+    }
+
+    // If still not found locally, attempt to fetch from Supabase public.users
+    if (!posUser) {
+      try {
+        const { data: remoteUser } = await supabase
+          .from('users')
+          .select('*')
+          .or(`auth_user_id.eq.${authUserId},email.eq.${authUserEmail}`)
+          .single();
+
+        if (remoteUser) {
+          posUser = remoteUser as User;
+          posUser.auth_user_id = authUserId;
+          await saveUser(posUser);
+        }
+      } catch {
+        // Table query error or not found
+      }
+    }
+
+    // Check if a POS profile exists
+    if (!posUser) {
+      await logLoginAttempt(authUserId, authUserEmail, false, 'No associated POS employee profile');
+      return {
+        success: false,
+        error: 'Authenticated successfully, but no POS employee profile is associated with this account. Please contact an administrator.',
+      };
+    }
+
+    // Check if active
+    if (!posUser.is_active) {
+      await supabase.auth.signOut();
+      await clearOfflineAuthSnapshot();
+      await logLoginAttempt(posUser.id, authUserEmail, false, 'Account deactivated');
+      return { success: false, error: 'Your POS profile is deactivated. Please contact an administrator.' };
+    }
+
+    // Update last login
+    const now = new Date().toISOString();
+    posUser.last_login_at = now;
+    posUser.failed_login_attempts = 0;
+    posUser.updated_at = now;
+    await saveUser(posUser);
+
+    // Log successful login and record snapshot for subsequent offline operations
+    await logLoginAttempt(posUser.id, posUser.username, true);
+    await logSecurityEvent('ONLINE_LOGIN', posUser.id, `User ${posUser.username} logged in online`);
+    const snapshot = await recordOfflineAuthSnapshot(posUser);
+
+    return { success: true, user: posUser, snapshot: snapshot || undefined };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'An unexpected error occurred';
+    if (message.includes('fetch') || message.includes('network') || message.includes('Failed to fetch')) {
+      return { success: false, error: 'Network unavailable. Online connection required for primary authentication.' };
+    }
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Determine the exact system authentication state:
+ * - 'online-authenticated': Verified active Supabase Auth session with active POS profile
+ * - 'offline-authorized': Network offline with valid, unexpired OfflineAuthSnapshot
+ * - 'unauthenticated': No active session or snapshot
+ * - 'auth-required': Session expired, revoked, or offline window exceeded
+ */
+export async function getAuthState(): Promise<{
+  state: AuthState;
+  user: User | null;
+  snapshot?: OfflineAuthSnapshot | null;
+  error?: string;
+}> {
+  const isOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
+
+  // 1. If online, check Supabase Auth as the primary authority
+  if (isOnline && supabase) {
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) {
+        // Server returned an authentication error
+        await clearOfflineAuthSnapshot();
+        return { state: 'auth-required', user: null, error: sessionError.message };
+      }
+
+      if (sessionData.session?.user) {
+        const authUser = sessionData.session.user;
+        let posUser = await getUserByAuthUserId(authUser.id);
+
+        if (!posUser && authUser.email) {
+          posUser = await getUserByEmail(authUser.email);
+          if (posUser) {
+            posUser.auth_user_id = authUser.id;
+            await saveUser(posUser);
+          }
+        }
+
+        if (!posUser) {
+          try {
+            const { data: remoteUser } = await supabase
+              .from('users')
+              .select('*')
+              .or(`auth_user_id.eq.${authUser.id},email.eq.${authUser.email}`)
+              .single();
+            if (remoteUser) {
+              posUser = remoteUser as User;
+              posUser.auth_user_id = authUser.id;
+              await saveUser(posUser);
+            }
+          } catch {
+            // Ignore
+          }
+        }
+
+        if (posUser) {
+          if (!posUser.is_active) {
+            // Server confirms account deactivated
+            await supabase.auth.signOut();
+            await clearOfflineAuthSnapshot();
+            await logSecurityEvent('ACCOUNT_REVOKED', posUser.id, 'User account was deactivated on server');
+            return { state: 'auth-required', user: null, error: 'Your POS profile is deactivated. Please contact an administrator.' };
+          }
+
+          // Valid online authentication -> record/update offline snapshot
+          const snapshot = await recordOfflineAuthSnapshot(posUser);
+          return { state: 'online-authenticated', user: posUser, snapshot };
+        }
+
+        return { state: 'auth-required', user: null, error: 'No associated POS employee profile found.' };
+      }
+    } catch (err) {
+      // Network error during online validation -> fall through to offline check
+      console.warn('[v0] Network error validating online session, checking offline authorization:', err);
+    }
+  }
+
+  // 2. Offline Mode or Supabase unreachable: Evaluate OfflineAuthSnapshot
+  const offlineCheck = await validateOfflineAuthSnapshot();
+  if (offlineCheck.valid && offlineCheck.user && offlineCheck.snapshot) {
+    return { state: 'offline-authorized', user: offlineCheck.user, snapshot: offlineCheck.snapshot };
+  }
+
+  return { state: 'unauthenticated', user: null, error: offlineCheck.reason };
+}
+
+/**
+ * Retrieve current user by validating active authentication / offline snapshot.
+ * Never allows unauthenticated localStorage bypasses.
+ */
+export async function getCurrentUser(): Promise<User | null> {
+  const { user } = await getAuthState();
   return user;
 }
 
-// Check if user is locked out
-function isUserLockedOut(user: User): boolean {
-  if (!user.locked_until) return false;
-  const lockedUntil = new Date(user.locked_until);
-  return lockedUntil > new Date();
-}
-
-// Generate session token
-function generateToken(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 16)}`;
-}
-
-// Login function
-export async function login(username: string, password: string): Promise<LoginResult> {
-  const user = await getUserByUsername(username);
-
-  if (!user) {
-    // Log failed login attempt
-    await logLoginAttempt('', username, false, 'User not found');
-    return { success: false, error: 'Invalid username or password' };
-  }
-
-  // Check if user is active
-  if (!user.is_active) {
-    await logLoginAttempt(user.id, username, false, 'Account deactivated');
-    return { success: false, error: 'Account is deactivated. Contact administrator.' };
-  }
-
-  // Check if user is locked out
-  if (isUserLockedOut(user)) {
-    await logLoginAttempt(user.id, username, false, 'Account locked');
-    return { success: false, error: `Account locked. Try again after ${new Date(user.locked_until!).toLocaleString()}` };
-  }
-
-  // Verify password
-  const validPassword = await verifyPassword(password, user.password_hash);
-
-  if (!validPassword) {
-    // Increment failed attempts
-    const failedAttempts = user.failed_login_attempts + 1;
-    const updates: Partial<User> = {
-      failed_login_attempts: failedAttempts,
-    };
-
-    if (failedAttempts >= MAX_FAILED_ATTEMPTS) {
-      const lockedUntil = new Date();
-      lockedUntil.setMinutes(lockedUntil.getMinutes() + LOCKOUT_DURATION_MINUTES);
-      updates.locked_until = lockedUntil.toISOString();
-
-      // Log security event for lockout
-      await logSecurityEvent('ACCOUNT_LOCKOUT', user.id, `Account locked after ${failedAttempts} failed attempts`);
-    }
-
-    // Update user with failed attempt count
-    await saveUser({ ...user, ...updates } as User);
-
-    await logLoginAttempt(user.id, username, false, 'Invalid password');
-    return { success: false, error: 'Invalid username or password' };
-  }
-
-  // Successful login - reset failed attempts and update last login
-  const now = new Date().toISOString();
-  const updatedUser: User = {
-    ...user,
-    failed_login_attempts: 0,
-    locked_until: undefined,
-    last_login_at: now,
-    updated_at: now,
-    sync_status: 'pending',
-  };
-
-  await saveUser(updatedUser);
-
-  // Create session
-  const session: SessionData = {
-    userId: user.id,
-    token: generateToken(),
-    loginAt: now,
-    deviceInfo: getDeviceInfo(),
-  };
-
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(updatedUser));
-
-  // Log successful login
-  await logLoginAttempt(user.id, username, true);
-
-  return { success: true, user: updatedUser };
-}
-
-// Logout function
+/**
+ * Explicit logout of Supabase Auth and termination of local offline authorization.
+ * Destroys all offline authorization snapshots and cached permissions.
+ */
 export async function logout(): Promise<void> {
-  const session = getCurrentSession();
-  if (session) {
-    // Get all login history for this user and update the latest one with logout time
-    const { getLoginHistoryByUser } = await import('./db');
-    const history = await getLoginHistoryByUser(session.userId);
-    const currentSession = history.find(h => h.login_at === session.loginAt && !h.logout_at);
-    if (currentSession) {
-      const logoutAt = new Date().toISOString();
-      const duration = Math.round((new Date(logoutAt).getTime() - new Date(currentSession.login_at).getTime()) / 60000);
-      await saveLoginHistory({
-        ...currentSession,
-        logout_at: logoutAt,
-        session_duration_minutes: duration,
-      });
+  const currentSnapshot = await getOfflineAuthSnapshot();
+  if (currentSnapshot?.userId) {
+    await logSecurityEvent('ONLINE_LOGOUT', currentSnapshot.userId, `User ${currentSnapshot.username} logged out`);
+  }
+
+  try {
+    if (supabase) {
+      await supabase.auth.signOut();
     }
+  } catch (error) {
+    console.warn('[v0] Supabase signOut warning:', error);
   }
 
-  clearSession();
+  // Clear offline authorization snapshot and legacy tokens
+  await clearOfflineAuthSnapshot();
+  localStorage.removeItem('pos_session');
+  localStorage.removeItem('pos_current_user');
 }
 
-// Clear session data
-function clearSession(): void {
-  localStorage.removeItem(SESSION_KEY);
-  localStorage.removeItem(CURRENT_USER_KEY);
-}
+/**
+ * Request password reset email via Supabase Auth
+ */
+export async function requestPasswordReset(email: string): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) {
+    return { success: false, error: 'Supabase client is not configured.' };
+  }
 
-// Log login attempt
-async function logLoginAttempt(userId: string, username: string, success: boolean, reason?: string): Promise<void> {
-  const loginRecord = {
-    id: generateId(),
-    user_id: userId,
-    user_name: username,
-    device_info: getDeviceInfo(),
-    login_at: new Date().toISOString(),
-    login_status: (success ? 'success' : 'failed') as 'success' | 'failed',
-    failure_reason: success ? undefined : reason,
-    sync_status: 'pending' as const,
-  };
+  try {
+    const redirectTo = typeof window !== 'undefined' ? window.location.origin : undefined;
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo,
+    });
 
-  await saveLoginHistory(loginRecord);
-
-  // Check for suspicious activity - multiple failed logins
-  if (!success && userId) {
-    const { getLoginHistoryByUser } = await import('./db');
-    const recentLogins = await getLoginHistoryByUser(userId);
-    const recentFailures = recentLogins.filter(l =>
-      l.login_status === 'failed' &&
-      new Date(l.login_at).getTime() > Date.now() - 3600000 // Last hour
-    );
-
-    if (recentFailures.length >= 3) {
-      await logSecurityEvent('MULTIPLE_FAILED_LOGINS', userId, `${recentFailures.length} failed login attempts in the last hour`);
+    if (error) {
+      return { success: false, error: error.message };
     }
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to request password reset' };
   }
 }
 
-// Log security event
-async function logSecurityEvent(eventType: string, userId: string | undefined, description: string): Promise<void> {
-  const { saveSecurityEvent } = await import('./db');
-  await saveSecurityEvent({
-    id: generateId(),
-    event_type: eventType as any,
-    severity: eventType === 'ACCOUNT_LOCKOUT' ? 'high' : 'medium',
-    user_id: userId,
-    description,
-    metadata: JSON.stringify({ timestamp: new Date().toISOString() }),
-    is_resolved: false,
-    created_at: new Date().toISOString(),
-    sync_status: 'pending',
-  });
+/**
+ * Resend signup confirmation email via Supabase Auth
+ */
+export async function resendConfirmationEmail(email: string): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) {
+    return { success: false, error: 'Supabase client is not configured.' };
+  }
+
+  try {
+    const emailRedirectTo = typeof window !== 'undefined' ? window.location.origin : undefined;
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: email.trim(),
+      options: { emailRedirectTo },
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to resend confirmation' };
+  }
 }
 
-// Change password
-export async function changePassword(userId: string, oldPassword: string, newPassword: string): Promise<{ success: boolean; error?: string }> {
-  const user = await getUser(userId);
-  if (!user) {
-    return { success: false, error: 'User not found' };
+/**
+ * Change password for the currently authenticated Supabase user
+ */
+export async function changePassword(
+  userIdOrNewPassword: string,
+  _oldPassword?: string,
+  newPasswordParam?: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) {
+    return { success: false, error: 'Supabase client is not configured.' };
   }
 
-  const validOldPassword = await verifyPassword(oldPassword, user.password_hash);
-  if (!validOldPassword) {
-    return { success: false, error: 'Current password is incorrect' };
-  }
+  const targetPassword = newPasswordParam || userIdOrNewPassword;
 
-  if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/\d/.test(newPassword)) {
+  if (targetPassword.length < 8 || !/[A-Z]/.test(targetPassword) || !/[a-z]/.test(targetPassword) || !/\d/.test(targetPassword)) {
     return { success: false, error: 'New password must be at least 8 characters and include uppercase, lowercase, and a number' };
   }
 
-  // Generate new secure hash with random salt
-  const newPasswordHash = await hashPassword(newPassword);
-  const updatedUser: User = {
-    ...user,
-    password_hash: newPasswordHash,
-    updated_at: new Date().toISOString(),
-    sync_status: 'pending',
-  };
-
-  await saveUser(updatedUser);
-
-  // Update session user if current user
-  const session = getCurrentSession();
-  if (session && session.userId === userId) {
-    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(updatedUser));
+  try {
+    const { error } = await supabase.auth.updateUser({ password: targetPassword });
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to update password' };
   }
-
-  // Log password change
-  await logAuditEvent('USER_PASSWORD_CHANGED', userId, 'user', userId);
-
-  return { success: true };
 }
 
-// Administrator-only password reset. The plaintext password is never persisted or logged.
+/**
+ * Administrator reset password request for a user
+ */
 export async function resetUserPassword(
   targetUserId: string,
-  newPassword: string,
-  actorId: string,
+  _newPassword?: string,
+  _actorId?: string
 ): Promise<{ success: boolean; error?: string }> {
-  const actor = await getUser(actorId);
-  if (!actor || actor.role_code !== 'admin') {
-    return { success: false, error: 'Only a system administrator can reset passwords' };
-  }
-
-  if (targetUserId === actorId) {
-    return { success: false, error: 'Use Change Password to update your own password' };
-  }
-
-  if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[a-z]/.test(newPassword) || !/\d/.test(newPassword)) {
-    return { success: false, error: 'Password must be at least 8 characters and include uppercase, lowercase, and a number' };
-  }
-
   const target = await getUser(targetUserId);
-  if (!target) {
-    return { success: false, error: 'User not found' };
+  if (!target || !target.email) {
+    return { success: false, error: 'User profile or email not found' };
   }
 
-  const now = new Date().toISOString();
-  await saveUser({
-    ...target,
-    password_hash: await hashPassword(newPassword),
-    failed_login_attempts: 0,
-    locked_until: undefined,
-    updated_at: now,
-    sync_status: 'pending',
-  });
-
-  await logAuditEvent('USER_PASSWORD_RESET', actorId, 'user', targetUserId, `Password reset for ${target.username}`);
-  await logSecurityEvent('USER_PASSWORD_RESET', targetUserId, `Password reset by administrator ${actor.username}`);
-  return { success: true };
+  return requestPasswordReset(target.email);
 }
 
-// Log audit event helper
-async function logAuditEvent(eventType: string, userId: string, entityType: string, entityId: string, reason?: string): Promise<void> {
-  const { saveAuditLog, getUser } = await import('./db');
-  const user = await getUser(userId);
+// Log login attempt helper
+async function logLoginAttempt(userId: string, username: string, success: boolean, reason?: string): Promise<void> {
+  try {
+    const loginRecord = {
+      id: generateId(),
+      user_id: userId,
+      user_name: username,
+      device_info: getDeviceInfo(),
+      login_at: new Date().toISOString(),
+      login_status: (success ? 'success' : 'failed') as 'success' | 'failed',
+      failure_reason: success ? undefined : reason,
+      sync_status: 'pending' as const,
+    };
 
-  await saveAuditLog({
-    id: generateId(),
-    event_type: eventType as any,
-    user_id: userId,
-    user_name: user?.full_name || user?.username || 'Unknown',
-    user_role: user?.role_code || 'cashier',
-    entity_type: entityType,
-    entity_id: entityId,
-    reason,
-    created_at: new Date().toISOString(),
-    sync_status: 'pending',
-  });
+    await saveLoginHistory(loginRecord);
+  } catch {
+    // Non-blocking
+  }
 }
 
-// Initialize default roles and admin user
+// Initialize default roles and system seed
 export async function initializeSecurity(): Promise<void> {
-  // Import security seed
   const { initializeSecurityData } = await import('./security-seed');
   await initializeSecurityData();
 }
 
-// Create new user (admin only)
+// Create new POS user profile (admin only)
 export async function createUser(
   username: string,
   email: string,
@@ -404,37 +529,26 @@ export async function createUser(
   branchId?: string
 ): Promise<{ success: boolean; error?: string; user?: User }> {
   try {
-    // Check if username exists
     const existingUser = await getUserByUsername(username);
     if (existingUser) {
-      return { success: false, error: 'Username already exists' };
+      return { success: false, error: 'Username already exists in POS profiles' };
     }
 
-    // Check if email exists
-    const { getUserByEmail } = await import('./db');
     const existingEmail = await getUserByEmail(email);
     if (existingEmail) {
-      return { success: false, error: 'Email already exists' };
+      return { success: false, error: 'Email already exists in POS profiles' };
     }
 
-    // Get role
     const role = await getRoleByCode(roleCode);
     if (!role) {
       return { success: false, error: 'Invalid role' };
     }
 
-    if (password.length < 6) {
-      return { success: false, error: 'Password must be at least 6 characters' };
-    }
-
-    const passwordHash = await hashPassword(password);
     const now = new Date().toISOString();
-
     const user: User = {
       id: generateId(),
       username,
       email,
-      password_hash: passwordHash,
       full_name: fullName,
       role_id: role.id,
       role_code: roleCode,
@@ -448,16 +562,13 @@ export async function createUser(
     };
 
     await saveUser(user);
-    await logAuditEvent('USER_CREATED', createdBy, 'user', user.id, `Created user ${username} with role ${roleCode}`);
-
     return { success: true, user };
   } catch (err) {
-    console.error('[v0] Error in createUser:', err);
-    return { success: false, error: err instanceof Error ? err.message : 'Failed to create user' };
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to create user profile' };
   }
 }
 
-// Update user status (activate/deactivate)
+// Update user status
 export async function updateUserStatus(
   userId: string,
   isActive: boolean,
@@ -465,9 +576,7 @@ export async function updateUserStatus(
   reason?: string
 ): Promise<{ success: boolean; error?: string }> {
   const user = await getUser(userId);
-  if (!user) {
-    return { success: false, error: 'User not found' };
-  }
+  if (!user) return { success: false, error: 'User not found' };
 
   const now = new Date().toISOString();
   const updatedUser: User = {
@@ -478,14 +587,6 @@ export async function updateUserStatus(
   };
 
   await saveUser(updatedUser);
-  await logAuditEvent(
-    isActive ? 'USER_REACTIVATED' : 'USER_DEACTIVATED',
-    actorId,
-    'user',
-    userId,
-    reason
-  );
-
   return { success: true };
 }
 
@@ -497,14 +598,10 @@ export async function updateUserRole(
   reason?: string
 ): Promise<{ success: boolean; error?: string }> {
   const user = await getUser(userId);
-  if (!user) {
-    return { success: false, error: 'User not found' };
-  }
+  if (!user) return { success: false, error: 'User not found' };
 
   const role = await getRoleByCode(newRoleCode);
-  if (!role) {
-    return { success: false, error: 'Invalid role' };
-  }
+  if (!role) return { success: false, error: 'Invalid role' };
 
   const now = new Date().toISOString();
   const updatedUser: User = {
@@ -516,7 +613,5 @@ export async function updateUserRole(
   };
 
   await saveUser(updatedUser);
-  await logAuditEvent('USER_ROLE_CHANGED', actorId, 'user', userId, `Role changed from ${user.role_code} to ${newRoleCode}. ${reason || ''}`);
-
   return { success: true };
 }
