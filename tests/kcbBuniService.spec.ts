@@ -1,13 +1,11 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import axios from 'axios';
-import MockAdapter from 'axios-mock-adapter';
 import { KcbBuniMpesaService } from '../src/payments/providers/KcbBuniMpesaService';
 
 describe('KcbBuniMpesaService', () => {
-  let mock: MockAdapter;
   let service: KcbBuniMpesaService;
 
   beforeEach(() => {
-    mock = new MockAdapter(axios);
     service = new KcbBuniMpesaService({
       KCB_BUNI_BASE_URL: 'https://kcb.example',
       KCB_BUNI_TOKEN_URL: 'https://kcb.example/oauth/token',
@@ -17,18 +15,21 @@ describe('KcbBuniMpesaService', () => {
     });
   });
 
-  afterEach(() => {
-    mock.restore();
-  });
-
   it('should initiate STK Push successfully', async () => {
-    mock.onPost('https://kcb.example/oauth/token').reply(200, { access_token: 'tok', expires_in: 3600 });
-    mock.onPost('https://kcb.example/stk-push').reply(200, {
-      merchantRequestId: 'MCR123',
-      checkoutRequestId: 'CHK123',
-      transactionReference: 'TRX123',
-      status: 'PENDING',
-      message: 'Request accepted',
+    vi.spyOn(axios, 'post').mockResolvedValue({
+      status: 200,
+      data: { access_token: 'tok', expires_in: 3600 },
+    });
+
+    vi.spyOn(service.client, 'post').mockResolvedValue({
+      status: 200,
+      data: {
+        merchantRequestId: 'MCR123',
+        checkoutRequestId: 'CHK123',
+        transactionReference: 'TRX123',
+        status: 'SUCCESS',
+        message: 'Request accepted',
+      },
     });
 
     const req = {
@@ -46,7 +47,9 @@ describe('KcbBuniMpesaService', () => {
   });
 
   it('should handle failed authentication', async () => {
-    mock.onPost('https://kcb.example/oauth/token').reply(401, { error: 'invalid_client' });
+    vi.spyOn(axios, 'post').mockRejectedValue({
+      response: { status: 401, data: { error: 'invalid_client' } },
+    });
 
     const req = {
       phoneNumber: '254700123456',

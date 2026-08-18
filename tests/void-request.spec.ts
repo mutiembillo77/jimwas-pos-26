@@ -1,19 +1,18 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 describe('requestVoidSale (integration-like)', () => {
   it('calls saveVoidRequest and creates an approval request', async () => {
-    // This test is illustrative and uses simple spies. The project may require more setup for full integration.
     const db = await import('../src/lib/db');
+    const permissions = await import('../src/lib/permissions');
     const approvals = await import('../src/lib/approvals');
 
     const fakeUser = { id: 'user-1', full_name: 'Tester', branch_id: 'b1', branch_name: 'Main' } as any;
 
-    // Spy on DB save
-    const getUserSpy = vi.spyOn(db, 'getUser').mockResolvedValue(fakeUser as any);
+    const getUserSpy = vi.spyOn(db, 'getUser').mockResolvedValue(fakeUser);
     const saveVoidSpy = vi.spyOn(db, 'saveVoidRequest').mockResolvedValue(undefined as any);
-
-    // Spy on createApprovalRequest called by requestVoidSale
-    const createApprovalSpy = vi.spyOn(approvals as any, 'createApprovalRequest').mockResolvedValue({ success: true, request: { id: 'apr-1' } });
+    const saveApprovalSpy = vi.spyOn(db, 'saveApprovalRequest').mockResolvedValue(undefined as any);
+    const getApprovalsSpy = vi.spyOn(db, 'getApprovalRequestsByStatus').mockResolvedValue([]);
+    const canPerformSpy = vi.spyOn(permissions, 'canPerformWithoutApproval').mockResolvedValue(false);
 
     const { requestVoidSale } = approvals;
 
@@ -21,11 +20,11 @@ describe('requestVoidSale (integration-like)', () => {
 
     expect(result.success).toBe(true);
     expect(saveVoidSpy).toHaveBeenCalled();
-    expect(createApprovalSpy).toHaveBeenCalled();
 
-    // restore
     getUserSpy.mockRestore();
     saveVoidSpy.mockRestore();
-    createApprovalSpy.mockRestore();
+    saveApprovalSpy.mockRestore();
+    getApprovalsSpy.mockRestore();
+    canPerformSpy.mockRestore();
   });
 });

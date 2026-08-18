@@ -76,10 +76,9 @@ export class KcbBuniMpesaService implements PaymentProvider {
   }
 
   public async initiatePayment(request: PaymentRequest): Promise<PaymentResponse> {
-    const token = await this.getToken();
-    const payload = this.buildStkPayload(request);
-
     try {
+      const token = await this.getToken();
+      const payload = this.buildStkPayload(request);
       const resp = await this.client.post('/stk-push', payload, { headers: { Authorization: `Bearer ${token}` } });
       const data = resp.data;
 
