@@ -1,6 +1,7 @@
 import { generateId, getProduct, saveProduct, saveTransaction, saveLoyaltyTransaction, saveStockMovement, saveCustomer } from './db';
 import { syncInsertTransaction, syncUpdateProduct, syncInsertStockMovement, syncUpdateCustomer, syncInsertLoyaltyTransaction } from './sync';
 import type { Product, Customer, CartItem, SaleType } from './types';
+import { PaymentMethod, PaymentTiming, isValidPaymentMethod } from '../types/payment';
 
 const LOYALTY_POINTS_PER_SHILLING = 100;
 
@@ -12,7 +13,8 @@ export interface CompleteSaleParams {
   cartTotal: number;
   products: Product[];
   selectedCustomer: Customer | null;
-  paymentMethod: 'cash' | 'card' | 'cod' | 'mpesa';
+  paymentMethod: PaymentMethod;
+  paymentTiming?: PaymentTiming;
   amountPaid: number;
   change: number;
   userId: string;
@@ -38,6 +40,7 @@ export async function completeSale({
   products,
   selectedCustomer,
   paymentMethod: method,
+  paymentTiming = 'immediate',
   amountPaid,
   change,
   userId,
@@ -56,6 +59,16 @@ export async function completeSale({
   await previousSale;
 
   try {
+  // Validate allowed payment method
+  if (!isValidPaymentMethod(method)) {
+    return {
+      success: false,
+      transactionId: '',
+      error: `Invalid or prohibited payment method: "${method}". Only kcb_buni, ncba, and cash are supported.`,
+    };
+  }
+
+  const isCod = paymentTiming === 'cod';
   const now = new Date().toISOString();
 
   // Build transaction items
@@ -73,21 +86,24 @@ export async function completeSale({
     id: generateId(),
     customer_id: selectedCustomer?.id,
     total_amount: cartTotal,
-    amount_paid: method === 'cod' ? 0 : amountPaid,
-    change_amount: method === 'cod' ? 0 : change,
+    amount_paid: isCod ? 0 : amountPaid,
+    change_amount: isCod ? 0 : change,
     payment_method: method,
+    payment_timing: paymentTiming,
+    is_cod: isCod,
     payment_account_id: paymentAccountId,
     payment_account_name: paymentAccountName,
     payment_account_paybill: paymentAccountPaybill,
     payment_account_number: paymentAccountNumber,
-    status: method === 'cod' ? 'pending' as const : 'completed' as const,
+    status: isCod ? 'pending' as const : 'completed' as const,
     created_at: now,
     sync_status: 'pending' as const,
     items,
     sale_type: saleType,
     deposit_amount: depositAmount,
-    balance_amount: method === 'cod' ? cartTotal : balanceAmount,
-    cod_status: method === 'cod' ? 'PENDING' as const : undefined,
+    balance_amount: isCod ? cartTotal : balanceAmount,
+    cod_status: isCod ? 'PENDING' as const : undefined,
+    mpesa_receipt: method === 'kcb_buni' ? mpesaReceipt : undefined,
   };
   // COD orders may be created for walk-in customers or customers without a phone.
   // Delivery contact details can be added later from Delivery Management.

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, Minus, Trash2, Search, User, ShoppingCart, Banknote, Smartphone, X, Package, Archive, ArchiveRestore, Loader2, CheckCircle2, XCircle, AlertCircle, Clock, FlaskConical, Zap, Printer, Truck } from 'lucide-react';
+import { Plus, Minus, Trash2, Search, User, ShoppingCart, Banknote, Smartphone, Landmark, X, Package, Archive, ArchiveRestore, Loader2, CheckCircle2, XCircle, AlertCircle, Clock, FlaskConical, Zap, Printer, Truck } from 'lucide-react';
 import { generateId, saveProduct, getAllProducts, getAllCustomers, saveCustomer, getKCBSettings, getBusinessSettings, getReceiptSettings, getTransaction, getAllPaymentAccounts } from '../lib/db';
 import { syncInsertCustomer, syncInsertProduct, getSupabase, getOnlineStatus } from '../lib/sync';
 import { logSaleCompleted, logCustomerCreated } from '../lib/audit';
@@ -10,9 +10,10 @@ import { completeSale, validatePhoneNumber, validatePrice, validateStock, saniti
 import { printReceipt, saveReceiptToHistory, getReceiptHistory } from '../lib/print';
 import { useDebounce } from '../hooks/useDebounce';
 import { SaleTypeSelector } from '../components/SaleTypeSelector';
-  import { createDelivery } from '../lib/enterprise';
-  import type { Product, Customer, CartItem, SaleType } from '../lib/types';
+import { createDelivery } from '../lib/enterprise';
+import type { Product, Customer, CartItem, SaleType } from '../lib/types';
 import type { PaymentAccount } from '../lib/settings-types';
+import { PaymentMethod, PaymentTiming, isProviderActive, getPaymentDisplayName } from '../types/payment';
 
 const LOYALTY_POINTS_PER_SHILLING = 100;
 
@@ -34,7 +35,8 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
   const [searchTerm, setSearchTerm] = useState('');
   const [customerSearch, setCustomerSearch] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'cod' | 'kcb'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
+  const [paymentTiming, setPaymentTiming] = useState<PaymentTiming>('immediate');
   const [deliveryFeeType, setDeliveryFeeType] = useState<'none' | 'optional' | 'from_cbd'>('none');
   const deliveryFee = deliveryFeeType === 'optional' ? 100 : deliveryFeeType === 'from_cbd' ? 300 : 0;
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
@@ -363,14 +365,15 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
       cartTotal,
       products,
       selectedCustomer,
-      paymentMethod: 'kcb',
+      paymentMethod: 'kcb_buni',
+      paymentTiming: 'immediate',
       amountPaid: cartTotal,
       change: 0,
-  userId: user?.id || 'system',
-  mpesaReceipt,
-  paymentAccountId,
-  paymentAccountName: paymentAccounts.find((account) => account.id === paymentAccountId)?.name ?? null,
-  });
+      userId: user?.id || 'system',
+      mpesaReceipt,
+      paymentAccountId,
+      paymentAccountName: paymentAccounts.find((account) => account.id === paymentAccountId)?.name ?? null,
+    });
 
     if (result.success) {
       await logSaleCompleted(result.transactionId, { cart, total_amount: cartTotal }, user?.id);
@@ -502,9 +505,15 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
       }
     }
 
-    // Calculate amount paid based on sale type
-    let paid = paymentMethod === 'cod' ? 0 : (parseFloat(amountPaid) || cartTotal);
-    let amountRequired = paymentMethod === 'cod' ? 0 : cartTotal;
+    // Prevent checkout with pending providers
+    if (paymentMethod === 'ncba') {
+      toast.show('NCBA payment gateway is currently pending activation. Please choose Physical Cash or KCB BUNI STK.', 'error');
+      return;
+    }
+
+    // Calculate amount paid based on payment timing and sale type
+    let paid = paymentTiming === 'cod' ? 0 : (parseFloat(amountPaid) || cartTotal);
+    let amountRequired = paymentTiming === 'cod' ? 0 : cartTotal;
     
     // For Lipa Mdogo and Kyama, only deposit is required today
     if (saleType === 'lipa_mdogo' || saleType === 'kyama') {
@@ -512,7 +521,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
       paid = Math.min(parseFloat(amountPaid) || depositAmount, cartTotal);
     }
     
-    if (paid < amountRequired) {
+    if (paid < amountRequired && paymentTiming !== 'cod') {
       const requiredLabel = (saleType === 'lipa_mdogo' || saleType === 'kyama') 
         ? 'deposit amount' 
         : 'total amount due';
@@ -526,25 +535,26 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
       products,
       selectedCustomer,
       paymentMethod,
+      paymentTiming,
       amountPaid: paid,
-      change: (saleType === 'lipa_mdogo' || saleType === 'kyama') ? 0 : change,
-  userId: user?.id || 'system',
-  paymentAccountId,
-  paymentAccountName: paymentAccounts.find((account) => account.id === paymentAccountId)?.name ?? null,
-  saleType,
+      change: (saleType === 'lipa_mdogo' || saleType === 'kyama' || paymentTiming === 'cod') ? 0 : change,
+      userId: user?.id || 'system',
+      paymentAccountId,
+      paymentAccountName: paymentAccounts.find((account) => account.id === paymentAccountId)?.name ?? null,
+      saleType,
       depositAmount: (saleType === 'lipa_mdogo' || saleType === 'kyama') ? depositAmount : 0,
-      balanceAmount: (saleType === 'lipa_mdogo' || saleType === 'kyama') ? (cartTotal - depositAmount) : 0,
+      balanceAmount: (saleType === 'lipa_mdogo' || saleType === 'kyama') ? (cartTotal - depositAmount) : paymentTiming === 'cod' ? cartTotal : 0,
     });
 
     if (result.success) {
       await logSaleCompleted(result.transactionId, { cart, total_amount: cartTotal, product_total: productTotal, delivery_fee: deliveryFee }, user?.id);
-      if (paymentMethod === 'cod') {
+      if (paymentTiming === 'cod') {
         await createDelivery(result.transactionId, {
           customer_id: selectedCustomer?.id,
           delivery_fee: deliveryFee,
           delivery_fee_paid: deliveryFee,
           delivery_fee_status: deliveryFee > 0 ? 'paid' : 'waived',
-          delivery_payment_method: deliveryFee > 0 ? 'cash' : undefined,
+          delivery_payment_method: deliveryFee > 0 ? (paymentMethod === 'cash' ? 'cash' : 'kcb_buni') : undefined,
           cod_amount: cartTotal,
           cod_collected: 0,
           cod_status: 'pending',
@@ -889,21 +899,47 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
                 onDepositChange={setDepositAmount}
               />
 
+              {/* Payment Timing Selector */}
+              <div>
+                <label className="text-sm text-slate-400 block mb-2 font-medium">Payment Timing</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'immediate' as const, label: 'Pay Now (Immediate)' },
+                    { id: 'cod' as const, label: 'C.O.D. (Pay on Delivery)' },
+                  ].map((timing) => (
+                    <button
+                      key={timing.id}
+                      type="button"
+                      onClick={() => setPaymentTiming(timing.id)}
+                      className={`py-2 px-3 rounded-lg border text-sm font-medium transition ${
+                        paymentTiming === timing.id
+                          ? 'border-emerald-500 bg-emerald-600/20 text-emerald-300'
+                          : 'border-slate-600 text-slate-400 hover:border-slate-500'
+                      }`}
+                    >
+                      {timing.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Payment Method */}
               <div>
-                <label className="text-sm text-slate-400 block mb-2">Payment Method</label>
+                <label className="text-sm text-slate-400 block mb-2 font-medium">Payment Method</label>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { id: 'cash', icon: Banknote, label: 'Cash' },
-                    { id: 'cod', icon: Truck, label: 'C.O.D.' },
-                    { id: 'kcb', icon: Smartphone, label: 'KCB STK' },
+                    { id: 'cash' as const, icon: Banknote, label: 'Cash' },
+                    { id: 'kcb_buni' as const, icon: Smartphone, label: 'KCB BUNI STK' },
+                    { id: 'ncba' as const, icon: Landmark, label: 'NCBA' },
                   ].map(({ id, icon: Icon, label }) => {
                     const isLocked = kcbStatus === 'waiting' || kcbStatus === 'initiating';
-                    const isKcbUnconfigured = id === 'kcb' && !kcbConfigured;
+                    const isKcbUnconfigured = id === 'kcb_buni' && !kcbConfigured;
+                    const isPending = id === 'ncba';
                     return (
                       <button
                         key={id}
-                        onClick={() => setPaymentMethod(id as 'cash' | 'cod' | 'kcb')}
+                        type="button"
+                        onClick={() => setPaymentMethod(id)}
                         disabled={isLocked}
                         className={`p-3 rounded-lg border-2 flex flex-col items-center gap-1 transition relative ${
                           paymentMethod === id
@@ -912,9 +948,14 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
                         } ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                       >
                         <Icon size={24} className={paymentMethod === id ? 'text-emerald-400' : isKcbUnconfigured ? 'text-slate-500' : 'text-slate-400'} />
-                        <span className={`text-sm ${paymentMethod === id ? 'text-white' : isKcbUnconfigured ? 'text-slate-500' : 'text-slate-400'}`}>
+                        <span className={`text-xs sm:text-sm font-medium text-center ${paymentMethod === id ? 'text-white' : isKcbUnconfigured ? 'text-slate-500' : 'text-slate-400'}`}>
                           {label}
                         </span>
+                        {isPending && (
+                          <span className="absolute -top-1 -right-1 bg-amber-500 text-black text-[9px] font-bold px-1 rounded">
+                            PENDING
+                          </span>
+                        )}
                         {isKcbUnconfigured && (
                           <span className="absolute -top-1 -right-1 bg-amber-500 text-black text-[9px] font-bold px-1 rounded">
                             {!kcbEnabled ? 'OFF' : 'KEY'}
@@ -925,6 +966,17 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
                   })}
                 </div>
               </div>
+
+              {/* NCBA Pending Notice */}
+              {paymentMethod === 'ncba' && (
+                <div className="bg-amber-950/40 border border-amber-600/50 rounded-lg p-3 flex items-start gap-2">
+                  <AlertCircle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-200">
+                    <p className="font-semibold text-amber-300">NCBA Integration Pending</p>
+                    <p className="mt-0.5">The NCBA payment gateway is pending implementation. Please select <strong>Physical Cash</strong> or <strong>KCB BUNI STK</strong> to complete this sale.</p>
+                  </div>
+                </div>
+              )}
 
               <div className="rounded-lg border border-slate-700 bg-slate-700/50 p-4">
                 <label className="mb-2 block text-sm text-slate-300">Delivery fee (tracked separately)</label>
@@ -939,7 +991,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
               </div>
 
               {/* KCB BUNI STK Push Section */}
-              {paymentMethod === 'kcb' && (
+              {paymentMethod === 'kcb_buni' && paymentTiming === 'immediate' && (
                 <div className="bg-slate-700 rounded-lg p-4 space-y-4">
                   {/* Sandbox badge */}
                   {kcbEnvironment === 'sandbox' && (
@@ -1195,7 +1247,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
               )}
 
               {/* Cash/C.O.D. Payment Section */}
-              {paymentMethod !== 'kcb' && (
+              {(paymentTiming === 'cod' || paymentMethod !== 'kcb_buni') && (
                 <>
                   {paymentAccounts.length > 0 && (
     <div className="mt-4">
@@ -1212,19 +1264,19 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
   {/* Amount Paid */}
                   <div>
                     <label className="text-sm text-slate-400 block mb-2">
-                      {paymentMethod === 'cod' ? 'Amount Paid (KES) — collected on delivery' : saleType === 'lipa_mdogo' || saleType === 'kyama' 
+                      {paymentTiming === 'cod' ? 'Amount Paid (KES) — collected on delivery' : saleType === 'lipa_mdogo' || saleType === 'kyama' 
                         ? 'Deposit Amount (KES)' 
                         : 'Amount Paid (KES)'}
                     </label>
                     <input
                       type="number"
-                      value={paymentMethod === 'cod' ? '0' : amountPaid}
+                      value={paymentTiming === 'cod' ? '0' : amountPaid}
                       onChange={(e) => setAmountPaid(e.target.value)}
-                      disabled={paymentMethod === 'cod'}
+                      disabled={paymentTiming === 'cod' || paymentMethod === 'ncba'}
                       placeholder={(saleType === 'lipa_mdogo' || saleType === 'kyama' 
                         ? depositAmount 
                         : cartTotal).toString()}
-                      className="w-full px-4 py-3 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-emerald-500 focus:outline-none text-lg"
+                      className="w-full px-4 py-3 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-emerald-500 focus:outline-none text-lg disabled:opacity-50"
                     />
                   </div>
 

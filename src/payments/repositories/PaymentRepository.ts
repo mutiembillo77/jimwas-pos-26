@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
-import { PaymentRequest } from '../dto/PaymentRequest';
+import { PaymentMethod, PaymentStatus } from '../../types/payment';
 
-export type PaymentStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'CANCELLED';
+export { PaymentStatus };
 
 export class PaymentRepository {
   private prisma: PrismaClient;
@@ -11,11 +11,11 @@ export class PaymentRepository {
   }
 
   async createFromInitiation(args: {
-    provider: string;
+    provider: PaymentMethod | string;
     merchantRequestId?: string;
     checkoutRequestId?: string;
     providerTransactionId?: string;
-    phoneNumber: string;
+    phoneNumber?: string;
     amount: number | string;
     invoiceNumber: string;
     status?: PaymentStatus;
@@ -27,7 +27,7 @@ export class PaymentRepository {
         providerTransactionId: args.providerTransactionId,
         merchantRequestId: args.merchantRequestId,
         checkoutRequestId: args.checkoutRequestId,
-        phoneNumber: args.phoneNumber,
+        phoneNumber: args.phoneNumber || '',
         amount: Number(args.amount),
         invoiceNumber: args.invoiceNumber,
         status: args.status ?? 'PENDING',

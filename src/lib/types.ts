@@ -75,6 +75,8 @@ export interface Transaction {
   amount_paid: number;
   change_amount: number;
   payment_method: string;
+  payment_timing?: 'immediate' | 'cod';
+  is_cod?: boolean;
   payment_account_id?: string | null;
   payment_account_name?: string | null;
   payment_account_paybill?: string | null;
@@ -272,7 +274,7 @@ export interface ReconciliationRecord {
 
 export type OutboundDeliveryStatus = 'pending' | 'packed' | 'assigned' | 'dispatched' | 'in_transit' | 'delivered' | 'closed' | 'returned' | 'failed' | 'cancelled';
 export type DeliveryFeeStatus = 'unpaid' | 'partial' | 'paid' | 'waived';
-export type DeliveryPaymentMethod = 'cash' | 'mpesa' | 'card' | 'bank' | 'credit';
+export type DeliveryPaymentMethod = 'cash' | 'kcb_buni' | 'ncba';
 
 export interface OutboundDelivery {
   id: string;

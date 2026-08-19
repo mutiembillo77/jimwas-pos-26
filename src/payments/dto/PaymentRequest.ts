@@ -1,13 +1,26 @@
-export type PaymentStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'CANCELLED';
+import { PaymentMethod, PaymentTiming, PaymentStatus } from '../../types/payment';
+
+export { PaymentStatus };
 
 export interface PaymentRequest {
-  provider: string;
+  provider: PaymentMethod;
   merchantRequestId?: string;
   checkoutRequestId?: string;
   providerTransactionId?: string;
-  phoneNumber: string;
+  phoneNumber?: string;
   amount: number | string;
   invoiceNumber: string;
   status?: PaymentStatus;
+  timing?: PaymentTiming;
+  paymentAccountId?: string;
+  paymentAccountName?: string;
+  sharedShortCode?: boolean;
+  orgShortCode?: string;
+  orgPassKey?: string;
+  callbackUrl?: string;
+  transactionDescription?: string;
+  metadata?: Record<string, any>;
+  cashierId?: string;
+  cashierName?: string;
   raw?: any;
 }

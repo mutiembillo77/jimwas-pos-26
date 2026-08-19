@@ -65,7 +65,7 @@ export const DEFAULT_PAYMENT_ACCOUNTS: PaymentAccount[] = [
 
 export interface PaymentMethodConfig {
   id: string;
-  method_name: 'cash' | 'card' | 'kcb' | 'bank_transfer';
+  method_name: 'cash' | 'kcb_buni' | 'ncba';
   is_enabled: boolean;
   display_name: string;
   requires_reference: boolean;
@@ -180,8 +180,7 @@ export const DEFAULT_RECEIPT_SETTINGS: ReceiptSettings = {
 };
 
 export const DEFAULT_PAYMENT_METHODS: PaymentMethodConfig[] = [
-  { id: 'pm-cash', method_name: 'cash', is_enabled: true, display_name: 'Cash', requires_reference: false, display_order: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'pm-kcb', method_name: 'kcb', is_enabled: true, display_name: 'KCB MpesaExpressAPI', requires_reference: true, display_order: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'pm-card', method_name: 'card', is_enabled: true, display_name: 'Card', requires_reference: false, display_order: 3, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 'pm-bank', method_name: 'bank_transfer', is_enabled: false, display_name: 'Bank Transfer', requires_reference: true, display_order: 4, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'pm-cash', method_name: 'cash', is_enabled: true, display_name: 'Physical Cash', requires_reference: false, display_order: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'pm-kcb', method_name: 'kcb_buni', is_enabled: true, display_name: 'KCB BUNI STK (MPESAEXPRESS)', requires_reference: true, display_order: 2, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'pm-ncba', method_name: 'ncba', is_enabled: false, display_name: 'NCBA (Pending)', requires_reference: true, display_order: 3, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
 ];

@@ -38,12 +38,13 @@ export function TransactionReceiptPopover({ transaction, customer, position }: T
 
   const getPaymentBadgeColor = (method: string) => {
     switch (method.toLowerCase()) {
-      case 'mpesa':
+      case 'kcb_buni':
       case 'kcb':
       case 'buni':
+      case 'mpesa':
         return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
-      case 'card':
-        return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+      case 'ncba':
+        return 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30';
       case 'cash':
         return 'bg-amber-500/20 text-amber-400 border-amber-500/30';
       default:

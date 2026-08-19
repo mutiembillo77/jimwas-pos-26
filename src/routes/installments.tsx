@@ -18,6 +18,7 @@ import {
   syncUpdateCustomer,
 } from '../lib/sync';
 import type { InstallmentPlan, InstallmentPayment, Customer, Product } from '../lib/types';
+import type { PaymentMethod } from '../types/payment';
 import { useToast } from '../components/Toast';
 
 export function InstallmentsPage() {
@@ -38,7 +39,7 @@ export function InstallmentsPage() {
     notes: '',
   });
   const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'mpesa'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', email: '' });
 
@@ -547,13 +548,14 @@ export function InstallmentsPage() {
                 <label className="text-sm text-slate-400 block mb-2">Payment Method</label>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { id: 'cash', label: 'Cash' },
-                    { id: 'card', label: 'Card' },
-                    { id: 'mpesa', label: 'M-Pesa' },
+                    { id: 'cash' as const, label: 'Cash' },
+                    { id: 'kcb_buni' as const, label: 'KCB BUNI' },
+                    { id: 'ncba' as const, label: 'NCBA (Pending)' },
                   ].map(({ id, label }) => (
                     <button
                       key={id}
-                      onClick={() => setPaymentMethod(id as 'cash' | 'card' | 'mpesa')}
+                      type="button"
+                      onClick={() => setPaymentMethod(id)}
                       className={`py-3 rounded-lg border-2 text-sm font-medium transition ${
                         paymentMethod === id
                           ? 'border-emerald-500 bg-emerald-600/20 text-emerald-400'

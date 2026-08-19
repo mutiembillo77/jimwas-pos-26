@@ -44,7 +44,7 @@ export function TransactionsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'sale' | 'kcb_payment' | 'void' | 'refund'>('all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'success' | 'failed' | 'pending'>('all');
-  const [filterMethod, setFilterMethod] = useState<'all' | 'cash' | 'kcb' | 'card' | 'bank_transfer'>('all');
+  const [filterMethod, setFilterMethod] = useState<'all' | 'cash' | 'kcb_buni' | 'ncba'>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
@@ -413,10 +413,9 @@ export function TransactionsPage() {
               className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-emerald-500"
             >
               <option value="all">All Methods</option>
-              <option value="cash">Cash</option>
-              <option value="kcb">KCB BUNI STK</option>
-              <option value="card">Card</option>
-              <option value="bank_transfer">Bank Transfer</option>
+              <option value="cash">Physical Cash</option>
+              <option value="kcb_buni">KCB BUNI STK</option>
+              <option value="ncba">NCBA</option>
             </select>
           </div>
 

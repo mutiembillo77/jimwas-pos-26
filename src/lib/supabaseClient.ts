@@ -13,5 +13,6 @@ export const isSupabaseConfigured = (): boolean => {
   return Boolean(url && anonKey && _supabase);
 };
 
+export const initialAuthRedirectError: string | null = null;
 export const supabase = _supabase;
 export default supabase;

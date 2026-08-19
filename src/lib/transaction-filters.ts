@@ -106,11 +106,12 @@ export function formatTransactionType(type: string): string {
 // Format payment method for display
 export function formatPaymentMethod(method: string): string {
   const methods: Record<string, string> = {
-    'cash': 'Cash',
-    'kcb': 'KCB BUNI STK',
-    'card': 'Card',
-    'bank_transfer': 'Bank Transfer',
-    'mpesa': 'KCB BUNI STK',
+    'cash': 'Physical Cash',
+    'kcb_buni': 'KCB BUNI STK (MPESAEXPRESS)',
+    'ncba': 'NCBA (Pending)',
+    // Legacy mappings for display
+    'kcb': 'KCB BUNI STK (MPESAEXPRESS)',
+    'mpesa': 'KCB BUNI STK (MPESAEXPRESS)',
   };
   return methods[method] || method;
 }

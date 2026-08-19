@@ -1,12 +1,16 @@
-export type TransactionStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'CANCELLED';
+import { PaymentMethod, PaymentTiming, PaymentStatus } from '../../types/payment';
+
+export type TransactionStatus = PaymentStatus;
 
 export interface PaymentResponse {
-  provider: string; // e.g. 'kcb_buni'
+  provider: PaymentMethod;
   providerTransactionId?: string;
   merchantRequestId?: string;
   checkoutRequestId?: string;
   responseCode?: string;
   responseMessage?: string;
   status: TransactionStatus;
+  timing?: PaymentTiming;
+  paymentId?: string;
   raw?: any;
 }
