@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import type { User, OfflineAuthSnapshot } from '../src/lib/security-types';
-import type { ReceiptSettings, Transaction } from '../src/lib/types';
+import type { Transaction } from '../src/lib/types';
+import type { ReceiptSettings } from '../src/lib/settings-types';
 import { maskPhoneNumber, buildReceiptHtml, saveReceiptToHistory, getReceiptHistory } from '../src/lib/print';
 
 // Mock IndexedDB storage for offline auth snapshot and users
@@ -517,7 +518,6 @@ describe('Jimwas POS — Comprehensive Authentication Security Boundary Audit', 
       customer_name: 'John Doe',
       customer_phone: '0712345678', // Raw unmasked phone
       created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
       sync_status: 'synced',
       items: [],
     };
@@ -548,7 +548,6 @@ describe('Jimwas POS — Comprehensive Authentication Security Boundary Audit', 
       customer_name: 'Alice Wambui',
       customer_phone: '0722123456', // Raw phone
       created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
       sync_status: 'synced',
       items: [
         {
@@ -559,7 +558,6 @@ describe('Jimwas POS — Comprehensive Authentication Security Boundary Audit', 
           quantity: 1,
           unit_price: 2500,
           subtotal: 2500,
-          created_at: new Date().toISOString(),
           sync_status: 'synced',
         },
       ],
