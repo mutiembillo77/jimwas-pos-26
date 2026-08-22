@@ -44,6 +44,9 @@ export class PaymentRepository {
   async updateFromCallback(merchantRequestId: string, updates: Partial<Record<string, any>>) {
     const existing = await this.findByMerchantRequestId(merchantRequestId);
     if (!existing) return null;
+    // Terminal-state guard: do not regress a completed or cancelled payment.
+    // A delayed / duplicate callback must not overwrite a SUCCESS or CANCELLED record.
+    if (['SUCCESS', 'CANCELLED'].includes(existing.status)) return existing;
     return this.prisma.payment.update({ where: { id: existing.id }, data: updates });
   }
 
