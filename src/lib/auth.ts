@@ -219,7 +219,7 @@ async function resolveEmail(identifier: string): Promise<string | null> {
  * Controlled, auditable legacy migration path for binding an unlinked POS profile.
  * Only binds if the POS profile has auth_user_id === null or empty (cannot steal or rebind an already-linked identity).
  */
-async function linkUnboundLegacyProfile(authUserId: string, authUserEmail: string): Promise<User | null> {
+async function linkUnboundLegacyProfile(authUserId: string, authUserEmail: string): Promise<User | undefined> {
   try {
     const normalizedEmail = authUserEmail.toLowerCase().trim();
     let candidate = await getUserByEmail(normalizedEmail);
@@ -253,7 +253,7 @@ async function linkUnboundLegacyProfile(authUserId: string, authUserEmail: strin
   } catch (err) {
     console.warn('[v0] Controlled legacy profile linking failed:', err);
   }
-  return null;
+  return undefined;
 }
 
 /**
@@ -862,8 +862,8 @@ export async function createUser(
 export async function updateUserStatus(
   userId: string,
   isActive: boolean,
-  actorId: string,
-  reason?: string
+  _actorId?: string,
+  _reason?: string
 ): Promise<{ success: boolean; error?: string }> {
   const user = await getUser(userId);
   if (!user) return { success: false, error: 'User not found' };
@@ -884,8 +884,8 @@ export async function updateUserStatus(
 export async function updateUserRole(
   userId: string,
   newRoleCode: RoleCode,
-  actorId: string,
-  reason?: string
+  _actorId?: string,
+  _reason?: string
 ): Promise<{ success: boolean; error?: string }> {
   const user = await getUser(userId);
   if (!user) return { success: false, error: 'User not found' };

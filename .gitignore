@@ -17,3 +17,7 @@ node_modules
 .env
 .vercel
 .env*
+
+# Temporary & local CLI state
+scratch/
+supabase/.temp/
