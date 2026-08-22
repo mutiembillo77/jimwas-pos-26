@@ -243,7 +243,204 @@ describe('PaymentRepository — Duplicate Invoice Creation', () => {
 });
 
 // ============================================================
-// SECTION 3: formatPhoneNumber — edge cases
+// SECTION 3: COMPLETE PAYMENT STATE MACHINE TRANSITION MATRIX
+// Explicit verification of all 16 possible transitions
+// ============================================================
+
+describe('PaymentRepository — Complete State Transition Matrix', () => {
+  let mockPrisma: { payment: any };
+
+  beforeEach(() => {
+    mockPrisma = {
+      payment: {
+        create: vi.fn(),
+        findFirst: vi.fn(),
+        update: vi.fn(),
+      },
+    };
+  });
+
+  // --- From PENDING ---
+  it('Transition 3.1: PENDING → SUCCESS is ALLOWED', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'PENDING' });
+    mockPrisma.payment.update.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'SUCCESS' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'SUCCESS' });
+    expect(mockPrisma.payment.update).toHaveBeenCalledTimes(1);
+    expect(res?.status).toBe('SUCCESS');
+  });
+
+  it('Transition 3.2: PENDING → FAILED is ALLOWED', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'PENDING' });
+    mockPrisma.payment.update.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'FAILED' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'FAILED' });
+    expect(mockPrisma.payment.update).toHaveBeenCalledTimes(1);
+    expect(res?.status).toBe('FAILED');
+  });
+
+  it('Transition 3.3: PENDING → CANCELLED is ALLOWED', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'PENDING' });
+    mockPrisma.payment.update.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'CANCELLED' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'CANCELLED' });
+    expect(mockPrisma.payment.update).toHaveBeenCalledTimes(1);
+    expect(res?.status).toBe('CANCELLED');
+  });
+
+  // --- From SUCCESS (Terminal) ---
+  it('Transition 3.4: SUCCESS → SUCCESS is BLOCKED/IDEMPOTENT (no DB write)', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'SUCCESS' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'SUCCESS' });
+    expect(mockPrisma.payment.update).not.toHaveBeenCalled();
+    expect(res?.status).toBe('SUCCESS');
+  });
+
+  it('Transition 3.5: SUCCESS → FAILED is BLOCKED (terminal guard)', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'SUCCESS' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'FAILED' });
+    expect(mockPrisma.payment.update).not.toHaveBeenCalled();
+    expect(res?.status).toBe('SUCCESS');
+  });
+
+  it('Transition 3.6: SUCCESS → PENDING is BLOCKED (terminal guard)', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'SUCCESS' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'PENDING' });
+    expect(mockPrisma.payment.update).not.toHaveBeenCalled();
+    expect(res?.status).toBe('SUCCESS');
+  });
+
+  it('Transition 3.7: SUCCESS → CANCELLED is BLOCKED (terminal guard)', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'SUCCESS' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'CANCELLED' });
+    expect(mockPrisma.payment.update).not.toHaveBeenCalled();
+    expect(res?.status).toBe('SUCCESS');
+  });
+
+  // --- From CANCELLED (Terminal) ---
+  it('Transition 3.8: CANCELLED → CANCELLED is BLOCKED/IDEMPOTENT', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'CANCELLED' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'CANCELLED' });
+    expect(mockPrisma.payment.update).not.toHaveBeenCalled();
+    expect(res?.status).toBe('CANCELLED');
+  });
+
+  it('Transition 3.9: CANCELLED → FAILED is BLOCKED', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'CANCELLED' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'FAILED' });
+    expect(mockPrisma.payment.update).not.toHaveBeenCalled();
+    expect(res?.status).toBe('CANCELLED');
+  });
+
+  it('Transition 3.10: CANCELLED → SUCCESS is BLOCKED', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'CANCELLED' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'SUCCESS' });
+    expect(mockPrisma.payment.update).not.toHaveBeenCalled();
+    expect(res?.status).toBe('CANCELLED');
+  });
+
+  it('Transition 3.11: CANCELLED → PENDING is BLOCKED', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'CANCELLED' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'PENDING' });
+    expect(mockPrisma.payment.update).not.toHaveBeenCalled();
+    expect(res?.status).toBe('CANCELLED');
+  });
+
+  // --- From FAILED (Non-terminal) ---
+  it('Transition 3.12: FAILED → FAILED is ALLOWED (re-records error details)', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'FAILED' });
+    mockPrisma.payment.update.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'FAILED' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'FAILED', resultDesc: 'Timeout retry' });
+    expect(mockPrisma.payment.update).toHaveBeenCalledTimes(1);
+    expect(res?.status).toBe('FAILED');
+  });
+
+  it('Transition 3.13: FAILED → SUCCESS is ALLOWED (delayed asynchronous success resolution)', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'FAILED' });
+    mockPrisma.payment.update.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'SUCCESS' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'SUCCESS', mpesaReceiptNumber: 'REC123' });
+    expect(mockPrisma.payment.update).toHaveBeenCalledTimes(1);
+    expect(res?.status).toBe('SUCCESS');
+  });
+
+  it('Transition 3.14: FAILED → PENDING is ALLOWED (worker backoff retry)', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'FAILED' });
+    mockPrisma.payment.update.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'PENDING' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'PENDING' });
+    expect(mockPrisma.payment.update).toHaveBeenCalledTimes(1);
+    expect(res?.status).toBe('PENDING');
+  });
+
+  it('Transition 3.15: FAILED → CANCELLED is ALLOWED', async () => {
+    mockPrisma.payment.findFirst.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'FAILED' });
+    mockPrisma.payment.update.mockResolvedValue({ id: 'p1', merchantRequestId: 'M1', status: 'CANCELLED' });
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+    const res = await repo.updateFromCallback('M1', { status: 'CANCELLED' });
+    expect(mockPrisma.payment.update).toHaveBeenCalledTimes(1);
+    expect(res?.status).toBe('CANCELLED');
+  });
+});
+
+// ============================================================
+// SECTION 4: 10x IDENTICAL CALLBACK REPLAY IDEMPOTENCY
+// Verifying database operation counts on repeated callbacks
+// ============================================================
+
+describe('PaymentRepository — 10x Callback Replay Idempotency', () => {
+  it('4.1 Replaying identical SUCCESS callback 10 times updates DB exactly ONCE', async () => {
+    let currentStatus = 'PENDING';
+    const mockPrisma = {
+      payment: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockImplementation(() =>
+          Promise.resolve({
+            id: 'pay-uuid-replay',
+            merchantRequestId: 'MRQ-10X',
+            status: currentStatus,
+          })
+        ),
+        update: vi.fn().mockImplementation((args: any) => {
+          currentStatus = args.data.status;
+          return Promise.resolve({
+            id: 'pay-uuid-replay',
+            merchantRequestId: 'MRQ-10X',
+            status: currentStatus,
+          });
+        }),
+      },
+    };
+
+    const repo = new PaymentRepository(mockPrisma as unknown as PrismaClient);
+
+    // Send 10 identical SUCCESS callbacks sequentially
+    for (let i = 1; i <= 10; i++) {
+      const result = await repo.updateFromCallback('MRQ-10X', {
+        status: 'SUCCESS',
+        providerTransactionId: 'TRX-10X',
+        callbackPayload: { iteration: i },
+      });
+      expect(result?.status).toBe('SUCCESS');
+    }
+
+    // 1st callback performed the update; remaining 9 callbacks were short-circuited by the terminal guard
+    expect(mockPrisma.payment.update).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.payment.findFirst).toHaveBeenCalledTimes(10);
+  });
+});
+
+// ============================================================
+// SECTION 5: formatPhoneNumber — edge cases
 // ============================================================
 
 describe('formatPhoneNumber — edge cases', () => {

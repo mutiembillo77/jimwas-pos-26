@@ -2,6 +2,7 @@ import { generateId, getProduct, saveProduct, saveTransaction, saveLoyaltyTransa
 import { syncInsertTransaction, syncUpdateProduct, syncInsertStockMovement, syncUpdateCustomer, syncInsertLoyaltyTransaction } from './sync';
 import type { Product, Customer, CartItem, SaleType } from './types';
 import { PaymentMethod, PaymentTiming, isValidPaymentMethod } from '../types/payment';
+import { ACTIVE_FINANCIAL_ENV, type FinancialEnvironment } from './environment';
 
 const LOYALTY_POINTS_PER_SHILLING = 100;
 
@@ -26,6 +27,9 @@ export interface CompleteSaleParams {
   saleType?: SaleType;
   depositAmount?: number;
   balanceAmount?: number;
+  /** Financial environment override. Defaults to ACTIVE_FINANCIAL_ENV from runtime config.
+   *  Must never be set to PRODUCTION by client-side code in a sandbox runtime. */
+  environment?: FinancialEnvironment;
 }
 
 export interface CompleteSaleResult {
@@ -52,6 +56,7 @@ export async function completeSale({
   saleType = 'standard',
   depositAmount = 0,
   balanceAmount = 0,
+  environment = ACTIVE_FINANCIAL_ENV,
 }: CompleteSaleParams): Promise<CompleteSaleResult> {
   const previousSale = saleWriteQueue;
   let releaseSale!: () => void;
@@ -104,6 +109,9 @@ export async function completeSale({
     balance_amount: isCod ? cartTotal : balanceAmount,
     cod_status: isCod ? 'PENDING' as const : undefined,
     mpesa_receipt: method === 'kcb_buni' ? mpesaReceipt : undefined,
+    // Immutable environment classifier — stamped at creation from trusted runtime config.
+    // Cannot be changed after creation. Prevents sandbox/production data mixing.
+    environment,
   };
   // COD orders may be created for walk-in customers or customers without a phone.
   // Delivery contact details can be added later from Delivery Management.

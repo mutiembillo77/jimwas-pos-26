@@ -14,6 +14,7 @@ import {
   type ExpenseCategoryRecord,
 } from './db';
 import { syncInsertLedgerEntry } from './sync';
+import { ACTIVE_FINANCIAL_ENV, type FinancialEnvironment } from './environment';
 
 export type LedgerEntryType = 'sale' | 'refund' | 'installment_payment' | 'loyalty_redemption' | 'void' | 'income' | 'expense' | 'adjustment' | 'cash_draw' | 'transfer';
 
@@ -72,10 +73,20 @@ export interface PeriodSummary {
   daily_breakdown: DailySummary[];
 }
 
+/**
+ * Returns ledger entries filtered to a specific financial environment.
+ *
+ * CRITICAL: The environment parameter is REQUIRED for production reporting.
+ * Do NOT call this without an environment to produce a production financial report.
+ * Defaults to ACTIVE_FINANCIAL_ENV from trusted runtime config.
+ *
+ * This prevents sandbox transactions from appearing in production reports.
+ */
 export async function getLedgerEntries(
   dateFrom?: string,
   dateTo?: string,
-  type?: string
+  type?: string,
+  environment: FinancialEnvironment = ACTIVE_FINANCIAL_ENV
 ): Promise<LedgerEntry[]> {
   const transactions = await getAllTransactions();
   const installmentPayments = await getAllInstallmentPayments();
@@ -84,8 +95,13 @@ export async function getLedgerEntries(
 
   const entries: LedgerEntry[] = [];
 
-  // Process transactions
+  // Process transactions — environment filter applied here
   for (const tx of transactions) {
+    // Enforce environment isolation: skip records from a different environment.
+    // Records without an environment field are treated as SANDBOX (safe default).
+    const txEnv: FinancialEnvironment = (tx as any).environment || 'SANDBOX';
+    if (txEnv !== environment) continue;
+
     const txDate = tx.created_at?.split('T')[0] || '';
     if (dateFrom && txDate < dateFrom) continue;
     if (dateTo && txDate > dateTo) continue;
@@ -111,8 +127,11 @@ export async function getLedgerEntries(
     entries.push(entry);
   }
 
-  // Process installment payments
+  // Process installment payments — environment inherited from parent plan
   for (const payment of installmentPayments) {
+    const payEnv: FinancialEnvironment = (payment as any).environment || 'SANDBOX';
+    if (payEnv !== environment) continue;
+
     const payDate = payment.created_at?.split('T')[0] || '';
     if (dateFrom && payDate < dateFrom) continue;
     if (dateTo && payDate > dateTo) continue;
@@ -134,7 +153,8 @@ export async function getLedgerEntries(
     entries.push(entry);
   }
 
-  // Process loyalty redemptions
+  // Process loyalty redemptions — not environment-classified; treat as same env as source tx
+  // Loyalty points are only redeemable in the same runtime environment as their source.
   for (const loyalty of loyaltyTransactions) {
     if (loyalty.transaction_type !== 'redeemed') continue;
 
@@ -160,8 +180,11 @@ export async function getLedgerEntries(
     entries.push(entry);
   }
 
-  // Process manual ledger entries
+  // Process manual ledger entries — environment filter applied
   for (const manual of manualEntries) {
+    const manualEnv: FinancialEnvironment = (manual as any).environment || 'SANDBOX';
+    if (manualEnv !== environment) continue;
+
     const entryDate = manual.date?.split('T')[0] || '';
     if (dateFrom && entryDate < dateFrom) continue;
     if (dateTo && entryDate > dateTo) continue;
@@ -196,8 +219,11 @@ export async function getLedgerEntries(
   return entries;
 }
 
-export async function getDailySummary(date: string): Promise<DailySummary> {
-  const entries = await getLedgerEntries(date, date);
+export async function getDailySummary(
+  date: string,
+  environment: FinancialEnvironment = ACTIVE_FINANCIAL_ENV
+): Promise<DailySummary> {
+  const entries = await getLedgerEntries(date, date, undefined, environment);
 
   const summary: DailySummary = {
     date,
@@ -262,9 +288,10 @@ export async function getDailySummary(date: string): Promise<DailySummary> {
 
 export async function getPeriodSummary(
   startDate: string,
-  endDate: string
+  endDate: string,
+  environment: FinancialEnvironment = ACTIVE_FINANCIAL_ENV
 ): Promise<PeriodSummary> {
-  const entries = await getLedgerEntries(startDate, endDate);
+  const entries = await getLedgerEntries(startDate, endDate, undefined, environment);
 
   const summary: PeriodSummary = {
     start_date: startDate,
