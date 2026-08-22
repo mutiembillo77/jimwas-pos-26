@@ -41,7 +41,7 @@ export function VoidRequestsPage() {
       // Fetch approval details for each void request
       const requestsWithDetails = await Promise.all(
         pending.map(async (vr) => {
-          const approval = await getApprovalRequest(vr.approval_request_id);
+          const approval = await getApprovalRequest(vr.approval_request_id ?? '');
           return {
             ...vr,
             approvalDetails: approval || undefined,
@@ -172,7 +172,7 @@ export function VoidRequestsPage() {
                     </div>
                     <div>
                       <div className="text-slate-400 text-xs font-medium mb-1">Amount</div>
-                      <div className="text-white text-lg font-bold">KES {request.transaction_amount.toLocaleString()}</div>
+                      <div className="text-white text-lg font-bold">KES {request.transaction_total.toLocaleString()}</div>
                     </div>
                     <div>
                       <div className="text-slate-400 text-xs font-medium mb-1">Requested By</div>
@@ -237,7 +237,7 @@ export function VoidRequestsPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-400">Amount:</span>
-                    <span className="font-semibold text-white">KES {selectedRequest.transaction_amount.toLocaleString()}</span>
+                    <span className="font-semibold text-white">KES {selectedRequest.transaction_total.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-400">Requested By:</span>

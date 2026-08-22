@@ -60,6 +60,7 @@ export interface PeriodSummary {
   total_refunds: number;
   total_voids: number;
   total_installment_payments: number;
+  total_loyalty_redemptions: number;
   total_income: number;
   total_expenses: number;
   total_adjustments: number;
@@ -272,6 +273,7 @@ export async function getPeriodSummary(
     total_refunds: 0,
     total_voids: 0,
     total_installment_payments: 0,
+    total_loyalty_redemptions: 0,
     total_income: 0,
     total_expenses: 0,
     total_adjustments: 0,

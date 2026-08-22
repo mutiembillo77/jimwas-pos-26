@@ -165,7 +165,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
       if (savedCart && savedCart.items.length > 0) {
         setCart(savedCart.items);
         setSelectedCustomer(savedCart.selectedCustomer);
-        setSaleType(savedCart.saleType || 'standard');
+        setSaleType((savedCart.saleType as import('../lib/types').SaleType) || 'standard');
         setDepositAmount(savedCart.depositAmount || 0);
       }
     } catch (error) {

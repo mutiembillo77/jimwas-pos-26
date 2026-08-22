@@ -2,8 +2,25 @@
 import { generateId } from './db';
 import type { KCBPaymentRecord } from './db';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? import.meta.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+function getValidEnv(...keys: (string | undefined | null)[]): string {
+  for (const k of keys) {
+    if (typeof k === 'string' && k.trim().length > 0) {
+      return k.trim();
+    }
+  }
+  return '';
+}
+
+// Only VITE_* variables are visible to the browser through import.meta.env.
+const SUPABASE_URL = getValidEnv(
+  import.meta.env.VITE_SUPABASE_URL
+);
+
+const SUPABASE_ANON_KEY = getValidEnv(
+  import.meta.env.VITE_SUPABASE_ANON_KEY,
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+);
+
 
 /**
  * Generate a KCB BUNI-compliant M-Pesa receipt number for testing/sandbox mode.

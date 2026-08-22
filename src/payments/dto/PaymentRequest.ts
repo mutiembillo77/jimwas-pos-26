@@ -1,6 +1,6 @@
 import { PaymentMethod, PaymentTiming, PaymentStatus } from '../../types/payment';
 
-export { PaymentStatus };
+export type { PaymentStatus };
 
 export interface PaymentRequest {
   provider: PaymentMethod;

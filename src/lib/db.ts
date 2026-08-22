@@ -32,7 +32,7 @@ import type {
   SafeDropRecord,
 } from './types';
 
-interface POSDatabase extends DBSchema {
+export interface POSDatabase extends DBSchema {
   customers: {
     key: string;
     value: {
@@ -75,6 +75,8 @@ interface POSDatabase extends DBSchema {
     value: {
       id: string;
       customer_id?: string;
+      customer_name?: string;
+      customer_phone?: string;
       total_amount: number;
       amount_paid: number;
       change_amount: number;
@@ -86,6 +88,10 @@ interface POSDatabase extends DBSchema {
       created_at: string;
       sync_status: 'pending' | 'synced';
       items: TransactionItem[];
+      cashier_id?: string;
+      cashier_name?: string;
+      branch_id?: string;
+      mpesa_receipt?: string;
     };
   };
   transaction_items: {

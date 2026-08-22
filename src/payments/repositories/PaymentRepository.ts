@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { PaymentMethod, PaymentStatus } from '../../types/payment';
 
-export { PaymentStatus };
+export type { PaymentStatus };
 
 export class PaymentRepository {
   private prisma: PrismaClient;

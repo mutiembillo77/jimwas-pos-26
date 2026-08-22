@@ -1,16 +1,12 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { SupabaseClient } from '@supabase/supabase-js';
+import type { StoreNames } from 'idb';
+import { supabase } from './supabaseClient';
 import { getDB, getSyncQueue, removeFromSyncQueue, addToSyncQueue, generateId, getSyncMetadata, setSyncMetadata } from './db';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? import.meta.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-let _supabase: SupabaseClient | null = null;
-
 export function getSupabase(): SupabaseClient | null {
-  if (!supabaseUrl || !supabaseKey) return null;
-  if (!_supabase) _supabase = createClient(supabaseUrl, supabaseKey);
-  return _supabase;
+  return supabase;
 }
+
 
 let isOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
 let isSyncing = false;
@@ -262,7 +258,8 @@ async function processSyncItem(item: { table_name: string; operation: string; da
 // Generic table sync config
 interface TableSyncConfig {
   table: string;
-  store: string;
+  // Must be a valid IDB store name so db.put/getFromIndex receive the correct literal type.
+  store: StoreNames<import('./db').POSDatabase>;
   uniqueIndex?: string;
   uniqueField?: string;
   relation?: { table: string; field: string };
@@ -318,36 +315,40 @@ async function syncTableFromRemote(client: SupabaseClient, db: Awaited<ReturnTyp
   const { data } = await query;
   if (!data) return;
 
+  // Supabase returns `any[]` at runtime; the generic type can include a ParserError
+  // union for complex select expressions. Double-cast via unknown to bypass it safely.
+  const rows = (data as unknown) as Record<string, unknown>[];
+
   if (config.single) {
-    if (data.length > 0) {
-      await db.put(config.store, { ...data[0], sync_status: 'synced' });
+    if (rows.length > 0) {
+      await db.put(config.store, { ...rows[0], sync_status: 'synced' } as never);
     }
     return;
   }
 
   const seenUniqueValues = new Set<unknown>();
-  for (const row of data) {
+  for (const row of rows) {
     if (config.uniqueIndex && config.uniqueField) {
       const fieldValue = row[config.uniqueField];
       if (fieldValue && seenUniqueValues.has(fieldValue)) continue;
       if (fieldValue) seenUniqueValues.add(fieldValue);
       if (fieldValue) {
-        const existing = await db.getFromIndex(config.store, config.uniqueIndex, fieldValue);
-        if (existing && existing.id !== row.id) {
+        const existing = await db.getFromIndex(config.store, config.uniqueIndex as never, fieldValue as never);
+        if (existing && (existing as Record<string, unknown>).id !== row.id) {
           const pending = await getSyncQueue();
-          const hasPendingWrite = pending.some(item => item.table_name === config.table && item.data.id === existing.id);
+          const hasPendingWrite = pending.some(item => item.table_name === config.table && item.data.id === (existing as Record<string, unknown>).id);
           if (hasPendingWrite) continue;
           // Reuse the existing local key to avoid unique-index collisions.
-          row.id = existing.id;
+          row.id = (existing as Record<string, unknown>).id;
         }
       }
     }
 
     const record = config.relation
-      ? { ...row, sync_status: 'synced', items: row[config.relation.field] || [] }
+      ? { ...row, sync_status: 'synced', items: (row[config.relation.field] as unknown[]) || [] }
       : { ...row, sync_status: 'synced' };
 
-    await db.put(config.store, record);
+    await db.put(config.store, record as never);
   }
 }
 
