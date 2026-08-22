@@ -1319,21 +1319,12 @@ function UserModal({
     setResetError('');
     setResetMessage('');
     if (!currentUserId || !user) return;
-    if (formData.reset_password !== formData.reset_confirm_password) {
-      setResetError('Passwords do not match');
-      return;
-    }
-    if (formData.reset_password.length < 8 || !/[A-Z]/.test(formData.reset_password) || !/[a-z]/.test(formData.reset_password) || !/\d/.test(formData.reset_password)) {
-      setResetError('Use at least 8 characters with uppercase, lowercase, and a number');
-      return;
-    }
     setResettingPassword(true);
-    const result = await resetUserPassword(user.id, formData.reset_password, currentUserId);
+    const result = await resetUserPassword(user.id, undefined, currentUserId);
     if (result.success) {
-      setResetMessage('Password reset successfully. The user can sign in with the new password.');
-      setFormData({ ...formData, reset_password: '', reset_confirm_password: '' });
+      setResetMessage(`Password reset email sent to ${user.email || 'the user'}. They will receive a link to set a new password.`);
     } else {
-      setResetError(result.error || 'Unable to reset password');
+      setResetError(result.error || 'Unable to send password reset email');
     }
     setResettingPassword(false);
   };
@@ -1487,27 +1478,24 @@ function UserModal({
               </div>
             </div>
           )}
-
           {isEditing && currentUserId && currentUserId !== user?.id && (
             <div className="mt-6 rounded-lg border border-amber-700/60 bg-amber-950/20 p-4">
               <div className="mb-3">
-                <h4 className="font-semibold text-amber-200">Administrator password reset</h4>
-                <p className="mt-1 text-xs leading-relaxed text-slate-400">Set a new password for this user. Their lockout is cleared and the password is never shown or stored in plaintext.</p>
+                <h4 className="font-semibold text-amber-200">Password recovery</h4>
+                <p className="mt-1 text-xs leading-relaxed text-slate-400">
+                  Send a password reset email to {user.email || 'this user'}. They will receive a secure link to create a new password.
+                </p>
               </div>
               {resetError && <div className="mb-3 rounded-lg border border-red-700 bg-red-900/40 p-3 text-sm text-red-200">{resetError}</div>}
               {resetMessage && <div className="mb-3 rounded-lg border border-emerald-700 bg-emerald-900/40 p-3 text-sm text-emerald-200">{resetMessage}</div>}
-              <div className="flex flex-col gap-3">
-                <div className="relative">
-                  <label className="block text-sm text-slate-400 mb-2" htmlFor="reset-password">New password</label>
-                  <input id="reset-password" type={showResetPassword ? 'text' : 'password'} value={formData.reset_password} onChange={(e) => setFormData({ ...formData, reset_password: e.target.value })} className="w-full px-4 py-3 pr-12 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-amber-500 focus:outline-none" autoComplete="new-password" />
-                  <button type="button" aria-label={showResetPassword ? 'Hide new password' : 'Show new password'} onClick={() => setShowResetPassword(!showResetPassword)} className="absolute right-3 top-9 text-slate-400 hover:text-white">{showResetPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button>
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-2" htmlFor="reset-confirm-password">Confirm new password</label>
-                  <input id="reset-confirm-password" type={showResetPassword ? 'text' : 'password'} value={formData.reset_confirm_password} onChange={(e) => setFormData({ ...formData, reset_confirm_password: e.target.value })} className="w-full px-4 py-3 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-amber-500 focus:outline-none" autoComplete="new-password" />
-                </div>
-                <button type="button" onClick={handleResetPassword} disabled={resettingPassword} className="w-full rounded-lg bg-amber-600 px-4 py-3 font-semibold text-white transition hover:bg-amber-700 disabled:opacity-50">{resettingPassword ? 'Resetting password...' : 'Reset Password'}</button>
-              </div>
+              <button
+                type="button"
+                onClick={handleResetPassword}
+                disabled={resettingPassword}
+                className="w-full rounded-lg bg-amber-600 px-4 py-3 font-semibold text-white transition hover:bg-amber-700 disabled:opacity-50"
+              >
+                {resettingPassword ? 'Sending reset email...' : 'Send Password Reset Email'}
+              </button>
             </div>
           )}
 

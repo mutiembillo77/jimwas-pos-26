@@ -6,5 +6,5 @@ enabled = true
 [db]
 major_version = 15
 
-[functions]
+[functions.admin-create-user]
 verify_jwt = true

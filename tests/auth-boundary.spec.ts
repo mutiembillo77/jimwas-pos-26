@@ -66,6 +66,7 @@ const mockGetSession = vi.fn();
 const mockSignInWithPassword = vi.fn();
 const mockSignOut = vi.fn();
 const mockRpc = vi.fn();
+const mockInvoke = vi.fn();
 let mockIsConfiguredValue = true;
 
 vi.mock('../src/lib/supabaseClient', () => ({
@@ -76,9 +77,15 @@ vi.mock('../src/lib/supabaseClient', () => ({
       signInWithPassword: (creds: { email: string; password: string }) => mockSignInWithPassword(creds),
       signOut: () => mockSignOut(),
     },
+    functions: {
+      invoke: (name: string, options: unknown) => mockInvoke(name, options),
+    },
     rpc: (fn: string, params: Record<string, unknown>) => mockRpc(fn, params),
     from: () => ({
       select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: null, error: null }),
+        }),
         or: () => ({
           single: async () => ({ data: null, error: null }),
         }),
@@ -93,6 +100,7 @@ import {
   login,
   logout,
   getCurrentUser,
+  createUser,
   recordOfflineAuthSnapshot,
   validateOfflineAuthSnapshot,
   isNetworkOrTransportError,
@@ -599,5 +607,104 @@ describe('Jimwas POS — Comprehensive Authentication Security Boundary Audit', 
 
     expect(htmlOutput).toContain('07XXXXXX56');
     expect(htmlOutput).not.toContain('0722123456');
+  });
+
+  // 19. Auth identity mismatch: Cannot silently rebind an account already bound to a different auth identity
+  it('19. Auth identity mismatch rejects rather than silently rebinding to a different auth identity', async () => {
+    // POS profile is bound to 'auth-usr-1'
+    mockSignInWithPassword.mockResolvedValueOnce({
+      data: {
+        user: { id: 'attacker-auth-id-999', email: 'cashier1@jimwas.com' },
+      },
+      error: null,
+    });
+
+    const loginRes = await login('cashier1@jimwas.com', 'Pass1234!');
+
+    expect(loginRes.success).toBe(false);
+    expect(loginRes.error).toContain('no POS employee profile is associated');
+    // Ensure original user's auth_user_id was NOT modified
+    const original = mockUsersStore.get('usr-1');
+    expect(original?.auth_user_id).toBe('auth-usr-1');
+  });
+
+  // 20. Login network error classification uses centralized isNetworkOrTransportError
+  it('20. Login network error classification uses centralized classifier for offline messaging', async () => {
+    mockSignInWithPassword.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    const loginRes = await login('cashier1@jimwas.com', 'Pass1234!');
+
+    expect(loginRes.success).toBe(false);
+    expect(loginRes.error).toContain('Network unavailable');
+  });
+
+  // 21. Unexpected application error during getAuthState fails closed
+  it('21. Unexpected application error during getAuthState fails closed without offline fallback', async () => {
+    mockGetSession.mockRejectedValueOnce(new Error('SyntaxError: Unexpected token in JSON at position 0'));
+
+    const result = await getAuthState();
+
+    expect(result.state).toBe('auth-required');
+    expect(result.user).toBeNull();
+  });
+
+  // 22. Genuine network failure + missing snapshot returns auth-required
+  it('22. Genuine network failure with missing snapshot returns auth-required', async () => {
+    mockSnapshotStore = null;
+    mockGetSession.mockRejectedValueOnce(new TypeError('fetch failed'));
+
+    const result = await getAuthState();
+
+    expect(result.state).toBe('auth-required');
+    expect(result.user).toBeNull();
+    expect(result.error).toContain('No offline authorization snapshot found');
+  });
+
+  // 23. createUser invokes admin-create-user Edge Function when online
+  it('23. createUser invokes admin-create-user Edge Function when online', async () => {
+    mockInvoke.mockResolvedValueOnce({
+      data: {
+        success: true,
+        user: {
+          id: 'new-user-id',
+          auth_user_id: 'new-auth-id',
+          username: 'newcashier',
+          email: 'newcashier@jimwas.com',
+          full_name: 'New Cashier',
+          role_id: 'role-cashier',
+          role_code: 'cashier',
+          is_active: true,
+          failed_login_attempts: 0,
+          created_by: 'usr-1',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          sync_status: 'synced',
+        },
+      },
+      error: null,
+    });
+
+    const res = await createUser('newcashier', 'newcashier@jimwas.com', 'Pass1234!', 'New Cashier', 'cashier', 'usr-1');
+
+    expect(res.success).toBe(true);
+    expect(res.user?.auth_user_id).toBe('new-auth-id');
+    expect(mockInvoke).toHaveBeenCalledWith('admin-create-user', expect.objectContaining({
+      body: expect.objectContaining({
+        username: 'newcashier',
+        email: 'newcashier@jimwas.com',
+        roleCode: 'cashier',
+      }),
+    }));
+  });
+
+  // 24. createUser falls back to local IndexedDB profile staging when offline
+  it('24. createUser falls back to local IndexedDB profile staging when offline', async () => {
+    mockInvoke.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    const res = await createUser('offlineuser', 'offline@jimwas.com', 'Pass1234!', 'Offline User', 'cashier', 'usr-1');
+
+    expect(res.success).toBe(true);
+    expect(res.user?.username).toBe('offlineuser');
+    expect(res.user?.sync_status).toBe('pending');
   });
 });

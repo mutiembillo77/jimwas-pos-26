@@ -183,9 +183,9 @@ async function resolveEmail(identifier: string): Promise<string | null> {
   const trimmed = identifier.trim();
   if (!trimmed) return null;
 
-  // If already an email, return as-is
+  // If already an email, return lowercased
   if (trimmed.includes('@')) {
-    return trimmed;
+    return trimmed.toLowerCase();
   }
 
   // Attempt RPC resolution on Supabase
@@ -195,23 +195,64 @@ async function resolveEmail(identifier: string): Promise<string | null> {
         p_username: trimmed,
       });
       if (!error && typeof data === 'string' && data.length > 0) {
-        return data;
+        return data.toLowerCase();
       }
     } catch {
       // Fall through to local fallback
     }
   }
 
-  // Fallback to locally cached user record by username
+  // Fallback to locally cached user record by exact username
   try {
     const localUser = await getUserByUsername(trimmed);
     if (localUser?.email) {
-      return localUser.email;
+      return localUser.email.toLowerCase();
     }
   } catch {
     // Ignore local lookup errors
   }
 
+  return null;
+}
+
+/**
+ * Controlled, auditable legacy migration path for binding an unlinked POS profile.
+ * Only binds if the POS profile has auth_user_id === null or empty (cannot steal or rebind an already-linked identity).
+ */
+async function linkUnboundLegacyProfile(authUserId: string, authUserEmail: string): Promise<User | null> {
+  try {
+    const normalizedEmail = authUserEmail.toLowerCase().trim();
+    let candidate = await getUserByEmail(normalizedEmail);
+
+    if (!candidate && supabase) {
+      const { data } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', normalizedEmail)
+        .maybeSingle();
+      if (data) candidate = data as User;
+    }
+
+    // Strict safety check: do not rebind if already associated with a different auth identity
+    if (candidate && (!candidate.auth_user_id || candidate.auth_user_id === authUserId)) {
+      candidate.auth_user_id = authUserId;
+      candidate.updated_at = new Date().toISOString();
+      await saveUser(candidate);
+
+      if (supabase) {
+        try {
+          await supabase.from('users').update({ auth_user_id: authUserId }).eq('id', candidate.id);
+        } catch {
+          // Non-critical if offline
+        }
+      }
+
+      await logAuthSecurityEvent('ONLINE_REAUTHORIZATION_SUCCESS', candidate.id, `POS profile linked to Auth identity ${authUserId}`, 'low');
+      return candidate;
+    }
+  } catch (err) {
+    console.warn('[v0] Controlled legacy profile linking failed:', err);
+  }
   return null;
 }
 
@@ -267,38 +308,20 @@ export async function login(identifier: string, password: string): Promise<Login
     const authUserId = authData.user.id;
     const authUserEmail = authData.user.email || email;
 
-    // Retrieve POS user profile linked to this Supabase Auth identity
+    // 1. Authoritative resolution: retrieve POS user profile strictly linked to this auth identity
     let posUser = await getUserByAuthUserId(authUserId);
 
-    // If not found by auth_user_id, try finding by email and link it
-    if (!posUser) {
-      posUser = await getUserByEmail(authUserEmail);
-      if (posUser) {
-        posUser.auth_user_id = authUserId;
-        posUser.updated_at = new Date().toISOString();
-        await saveUser(posUser);
-
-        // Also update Supabase public.users table if accessible
-        try {
-          await supabase.from('users').update({ auth_user_id: authUserId }).eq('id', posUser.id);
-        } catch {
-          // Non-critical if offline
-        }
-      }
-    }
-
-    // If still not found locally, attempt to fetch from Supabase public.users
+    // 2. If not found locally, fetch from Supabase public.users strictly by auth_user_id
     if (!posUser) {
       try {
         const { data: remoteUser } = await supabase
           .from('users')
           .select('*')
-          .or(`auth_user_id.eq.${authUserId},email.eq.${authUserEmail}`)
-          .single();
+          .eq('auth_user_id', authUserId)
+          .maybeSingle();
 
         if (remoteUser) {
           posUser = remoteUser as User;
-          posUser.auth_user_id = authUserId;
           await saveUser(posUser);
         }
       } catch {
@@ -306,7 +329,12 @@ export async function login(identifier: string, password: string): Promise<Login
       }
     }
 
-    // Check if a POS profile exists
+    // 3. Controlled legacy fallback: only link if profile has NO existing auth_user_id bound
+    if (!posUser) {
+      posUser = await linkUnboundLegacyProfile(authUserId, authUserEmail);
+    }
+
+    // 4. Check if a POS profile exists
     if (!posUser) {
       await logLoginAttempt(authUserId, authUserEmail, false, 'No associated POS employee profile');
       return {
@@ -315,7 +343,7 @@ export async function login(identifier: string, password: string): Promise<Login
       };
     }
 
-    // Check if active
+    // 5. Check if active
     if (!posUser.is_active) {
       await supabase.auth.signOut();
       await clearOfflineAuthSnapshot();
@@ -323,7 +351,7 @@ export async function login(identifier: string, password: string): Promise<Login
       return { success: false, error: 'Your POS profile is deactivated. Please contact an administrator.' };
     }
 
-    // Update last login
+    // 6. Update last login
     const now = new Date().toISOString();
     posUser.last_login_at = now;
     posUser.failed_login_attempts = 0;
@@ -337,10 +365,10 @@ export async function login(identifier: string, password: string): Promise<Login
 
     return { success: true, user: posUser, snapshot: snapshot || undefined };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'An unexpected error occurred';
-    if (message.includes('fetch') || message.includes('network') || message.includes('Failed to fetch')) {
+    if (isNetworkOrTransportError(error)) {
       return { success: false, error: 'Network unavailable. Online connection required for primary authentication.' };
     }
+    const message = error instanceof Error ? error.message : 'An unexpected error occurred';
     return { success: false, error: message };
   }
 }
@@ -350,7 +378,7 @@ export async function login(identifier: string, password: string): Promise<Login
  *
  * ONLINE BOUNDARY:
  * 1. Supabase responds with valid session:
- *    -> Validate active POS profile
+ *    -> Validate active POS profile by auth_user_id
  *    -> 'online-authenticated'
  *    -> Refresh 24-hour OfflineAuthSnapshot
  *
@@ -419,28 +447,19 @@ export async function getAuthState(): Promise<{
         };
       }
 
-      // Case 3: Supabase responds with valid session -> Validate POS profile
+      // Case 3: Supabase responds with valid session -> Validate POS profile strictly by auth_user_id
       const authUser = sessionData.session.user;
       let posUser = await getUserByAuthUserId(authUser.id);
-
-      if (!posUser && authUser.email) {
-        posUser = await getUserByEmail(authUser.email);
-        if (posUser) {
-          posUser.auth_user_id = authUser.id;
-          await saveUser(posUser);
-        }
-      }
 
       if (!posUser) {
         try {
           const { data: remoteUser } = await supabase
             .from('users')
             .select('*')
-            .or(`auth_user_id.eq.${authUser.id},email.eq.${authUser.email}`)
-            .single();
+            .eq('auth_user_id', authUser.id)
+            .maybeSingle();
           if (remoteUser) {
             posUser = remoteUser as User;
-            posUser.auth_user_id = authUser.id;
             await saveUser(posUser);
           }
         } catch {
@@ -626,7 +645,10 @@ export async function changePassword(
 }
 
 /**
- * Administrator reset password request for a user
+ * Administrator password reset request for a user.
+ * Sends a secure password reset email to the user's registered address via Supabase Auth.
+ * Note: Direct programmatic password assignment requires Supabase Admin API via a trusted
+ * backend/Edge Function and is never executed from browser client code.
  */
 export async function resetUserPassword(
   targetUserId: string,
@@ -734,23 +756,75 @@ export async function initializeSecurity(): Promise<void> {
   await initializeSecurityData();
 }
 
-// Create new POS user profile (admin only)
+/**
+ * Create new POS user profile (admin only).
+ * Provisions the local employee record. Note: Supabase Auth credentials must be created
+ * either through user registration, the first-admin setup flow, or a trusted backend/Edge Function.
+ */
 export async function createUser(
   username: string,
   email: string,
-  password: string,
+  _password: string,
   fullName: string,
   roleCode: RoleCode,
   createdBy: string,
   branchId?: string
 ): Promise<{ success: boolean; error?: string; user?: User }> {
+  const normalizedUsername = (username || '').trim();
+  const normalizedEmail = (email || '').trim().toLowerCase();
+  const normalizedName = (fullName || '').trim();
+
+  if (!normalizedUsername) {
+    return { success: false, error: 'Username is required' };
+  }
+
+  if (!normalizedEmail || !normalizedEmail.includes('@')) {
+    return { success: false, error: 'Valid email is required' };
+  }
+
+  if (!normalizedName) {
+    return { success: false, error: 'Full name is required' };
+  }
+
+  // 1. If online and Supabase is configured, invoke the trusted admin-create-user Edge Function
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-create-user', {
+        body: {
+          username: normalizedUsername,
+          email: normalizedEmail,
+          password: _password,
+          fullName: normalizedName,
+          roleCode,
+          branchId,
+        },
+      });
+
+      if (!error && data?.success && data?.user) {
+        const createdUser = data.user as User;
+        await saveUser(createdUser);
+        return { success: true, user: createdUser };
+      }
+
+      if (data?.error || error?.message) {
+        return { success: false, error: data?.error || error?.message || 'Failed to provision employee account.' };
+      }
+    } catch (edgeErr) {
+      if (!isNetworkOrTransportError(edgeErr)) {
+        return { success: false, error: edgeErr instanceof Error ? edgeErr.message : 'User provisioning error' };
+      }
+      console.warn('[v0] Edge Function unreachable, falling back to local user profile staging:', edgeErr);
+    }
+  }
+
+  // 2. Offline / local fallback profile creation
   try {
-    const existingUser = await getUserByUsername(username);
+    const existingUser = await getUserByUsername(normalizedUsername);
     if (existingUser) {
       return { success: false, error: 'Username already exists in POS profiles' };
     }
 
-    const existingEmail = await getUserByEmail(email);
+    const existingEmail = await getUserByEmail(normalizedEmail);
     if (existingEmail) {
       return { success: false, error: 'Email already exists in POS profiles' };
     }
@@ -763,9 +837,9 @@ export async function createUser(
     const now = new Date().toISOString();
     const user: User = {
       id: generateId(),
-      username,
-      email,
-      full_name: fullName,
+      username: normalizedUsername,
+      email: normalizedEmail,
+      full_name: normalizedName,
       role_id: role.id,
       role_code: roleCode,
       branch_id: branchId,
