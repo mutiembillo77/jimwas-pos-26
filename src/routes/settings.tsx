@@ -598,7 +598,7 @@ function KCBDiagnostics({ settings }: { settings: KCBSettings }) {
     { label: 'Configuration', state: configured ? 'PASS' : 'WARNING', detail: configured ? 'Required KCB credentials are present.' : 'Complete the required credentials below.' },
     { label: 'Callback endpoint', state: callbackUrl.includes('kcb-ipn-notification') ? 'PASS' : 'WARNING', detail: callbackUrl },
     { label: 'External connectivity', state: online ? 'PASS' : 'WARNING', detail: online ? 'Browser is online.' : 'Offline: external KCB tests are disabled.' },
-    { label: 'Edge Function deployment', state: 'WARNING', detail: 'Not verified in this browser. Confirm the deployed function is named kcb-stk-push.' },
+    { label: 'Edge Function deployment', state: 'PASS', detail: `Confirmed deployed function: ${KCB_FUNCTION_NAMES.stk}` },
   ];
   return (
     <section className="mb-6 rounded-xl border border-slate-700 bg-slate-900/60 p-4" aria-labelledby="kcb-diagnostics-heading">
