@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Search, Plus, Edit2, Package, AlertTriangle, X, Power, AlertCircle, Trash2 } from 'lucide-react';
 import { getAllProducts, saveProduct, deleteProduct, generateId } from '../lib/db';
-import { syncInsertProduct, syncUpdateProduct, syncDeleteProduct } from '../lib/sync';
+import { syncInsertProduct, syncUpdateProduct, syncDeleteProduct, subscribeToDataChanges } from '../lib/sync';
 import { logProductCreated, logProductUpdated, logPriceChanged } from '../lib/audit';
 import { useAuth, PermissionGuard } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
@@ -36,6 +36,13 @@ export function ProductsPage() {
 
   useEffect(() => {
     loadProducts();
+
+    const unsubscribe = subscribeToDataChanges(({ table }) => {
+      if (table === 'products' || table === '*') {
+        loadProducts();
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
   const loadProducts = async () => {

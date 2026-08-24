@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Search, Plus, Star, TrendingUp, Phone, Mail, X, Edit2, Gift } from 'lucide-react';
 import { getAllCustomers, saveCustomer, generateId, getLoyaltyTransactionsByCustomer, saveLoyaltyTransaction } from '../lib/db';
-import { syncInsertCustomer, syncUpdateCustomer, syncInsertLoyaltyTransaction } from '../lib/sync';
+import { syncInsertCustomer, syncUpdateCustomer, syncInsertLoyaltyTransaction, subscribeToDataChanges } from '../lib/sync';
 import { logCustomerCreated, logCustomerUpdated } from '../lib/audit';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
@@ -22,6 +22,13 @@ export function CustomersPage() {
 
   useEffect(() => {
     loadCustomers();
+
+    const unsubscribe = subscribeToDataChanges(({ table }) => {
+      if (table === 'customers' || table === 'loyalty_transactions' || table === '*') {
+        loadCustomers();
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
   const loadCustomers = async () => {

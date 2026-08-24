@@ -27,7 +27,7 @@ import {
   getDeliveriesByStatus,
   getDeliveryItemsByDelivery,
 } from '../lib/db';
-import { syncInsertStockMovement, syncUpdateProduct, syncInsertDelivery, syncInsertDeliveryItem } from '../lib/sync';
+import { syncInsertStockMovement, syncUpdateProduct, syncInsertDelivery, syncInsertDeliveryItem, subscribeToDataChanges } from '../lib/sync';
 import { logStockAdjusted } from '../lib/audit';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
@@ -90,6 +90,13 @@ export function InventoryPage() {
 
   useEffect(() => {
     loadData();
+
+    const unsubscribe = subscribeToDataChanges(({ table }) => {
+      if (['products', 'stock_movements', 'suppliers', 'deliveries', 'delivery_items', '*'].includes(table)) {
+        loadData();
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
   const loadData = async () => {

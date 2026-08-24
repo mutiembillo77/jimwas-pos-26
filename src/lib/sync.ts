@@ -71,6 +71,25 @@ export function getSyncState(): SyncState {
   return { ...syncState };
 }
 
+export type DataChangeDetail = { table: string; eventType: string; data?: unknown };
+export type DataChangeListener = (detail: DataChangeDetail) => void;
+const dataChangeListeners = new Set<DataChangeListener>();
+
+export function subscribeToDataChanges(listener: DataChangeListener): () => void {
+  dataChangeListeners.add(listener);
+  return () => dataChangeListeners.delete(listener);
+}
+
+export function notifyDataUpdated(table: string, eventType: string = 'sync', data?: unknown) {
+  const detail: DataChangeDetail = { table, eventType, data };
+  dataChangeListeners.forEach(listener => {
+    try { listener(detail); } catch (e) { console.warn('[Sync] Data listener error:', e); }
+  });
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('jimwas:data-updated', { detail }));
+  }
+}
+
 export interface SyncQueueItem {
   id: string;
   table_name: string;
@@ -126,6 +145,7 @@ export function initNetworkListeners() {
     isOnline = true;
     syncState.status = 'synced';
     notifySyncState();
+    initRealtimeSync();
     triggerSync();
   });
 
@@ -139,6 +159,8 @@ export function initNetworkListeners() {
     notifySyncState();
   });
   checkPendingCount();
+  initRealtimeSync();
+  initBackgroundSyncHeartbeat(15000);
 }
 
 async function checkPendingCount() {
@@ -223,6 +245,85 @@ async function triggerSync() {
   }
 }
 
+const TABLE_ALLOWED_COLUMNS: Record<string, string[]> = {
+  transactions: [
+    'id', 'customer_id', 'total_amount', 'amount_paid', 'change_amount',
+    'payment_method', 'status', 'notes', 'created_at', 'sync_status',
+    'local_id', 'cashier_id', 'cashier_name', 'branch_id', 'payment_timing',
+    'is_cod', 'cod_status', 'mpesa_receipt', 'environment'
+  ],
+  transaction_items: [
+    'id', 'transaction_id', 'product_id', 'product_name', 'quantity',
+    'unit_price', 'subtotal', 'created_at'
+  ],
+  products: [
+    'id', 'name', 'sku', 'price', 'cost', 'stock', 'category',
+    'image_url', 'is_active', 'low_stock_alert', 'barcode',
+    'created_at', 'updated_at', 'sync_status', 'local_id'
+  ],
+  customers: [
+    'id', 'name', 'phone', 'email', 'loyalty_points', 'total_spent',
+    'created_at', 'updated_at', 'sync_status', 'local_id'
+  ],
+  stock_movements: [
+    'id', 'product_id', 'qty_delta', 'reason', 'note', 'balance_after',
+    'reference_type', 'reference_id', 'branch_id', 'created_at',
+    'created_by', 'sync_status', 'local_id'
+  ],
+  audit_logs: [
+    'id', 'event_type', 'user_id', 'user_name', 'user_role', 'entity_type',
+    'entity_id', 'old_value', 'new_value', 'reason', 'branch_id',
+    'branch_name', 'device_info', 'ip_address', 'created_at', 'sync_status'
+  ],
+  kcb_payments: [
+    'id', 'checkout_request_id', 'merchant_request_id', 'phone_number',
+    'amount', 'status', 'result_code', 'result_desc', 'mpesa_receipt_number',
+    'transaction_date', 'transaction_id', 'customer_id', 'cashier_id',
+    'cashier_name', 'callback_received', 'callback_payload', 'raw_request',
+    'raw_response', 'error_message', 'attempts', 'idempotency_key',
+    'last_attempt_at', 'completed_at', 'created_at', 'updated_at'
+  ],
+  payment: [
+    'id', 'provider', 'provider_transaction_id', 'merchant_request_id',
+    'checkout_request_id', 'phone_number', 'amount', 'invoice_number',
+    'status', 'transaction_type', 'callback_payload', 'environment'
+  ],
+  business_settings: [
+    'id', 'business_name', 'business_phone', 'business_email',
+    'business_address', 'tax_id', 'currency', 'currency_symbol',
+    'receipt_header', 'receipt_footer', 'show_tax_on_receipt', 'logo_url',
+    'created_at', 'updated_at', 'sync_status'
+  ],
+  kcb_settings: [
+    'id', 'is_enabled', 'environment', 'client_id', 'client_secret',
+    'org_shortcode', 'org_passkey', 'callback_url', 'timeout_url',
+    'public_cert_path', 'default_phone_country_code', 'business_paybill',
+    'business_account', 'business_name', 'last_updated', 'last_updated_by',
+    'created_at', 'updated_at', 'sync_status'
+  ],
+  payment_accounts: [
+    'id', 'name', 'account_type', 'paybill_number', 'account_number',
+    'bank_name', 'branch_name', 'code', 'created_at', 'updated_at'
+  ],
+};
+
+export function sanitizeForSupabase(table: string, data: Record<string, unknown>): Record<string, unknown> {
+  const allowed = TABLE_ALLOWED_COLUMNS[table];
+  if (!allowed) {
+    const copy = { ...data };
+    delete copy.items;
+    delete copy._local;
+    return copy;
+  }
+  const clean: Record<string, unknown> = {};
+  for (const col of allowed) {
+    if (col in data && data[col] !== undefined) {
+      clean[col] = data[col];
+    }
+  }
+  return clean;
+}
+
 async function processSyncItem(item: { table_name: string; operation: string; data: Record<string, unknown> }) {
   const client = getSupabase();
   if (!client) throw new Error('Supabase is not configured. Sync is unavailable while offline.');
@@ -232,15 +333,36 @@ async function processSyncItem(item: { table_name: string; operation: string; da
   let error;
   switch (operation) {
     case 'insert': {
-      // All local records carry their stable ID; upsert makes retries safe after
-      // a timeout or a browser restart instead of creating duplicate rows.
-      const result = await table.upsert(data, { onConflict: 'id', ignoreDuplicates: false });
-      error = result.error;
+      if (table_name === 'transactions') {
+        const rawItems = Array.isArray(data.items) ? data.items : [];
+        const sanitizedTx = sanitizeForSupabase('transactions', data);
+        const result = await table.upsert(sanitizedTx, { onConflict: 'id', ignoreDuplicates: false });
+        error = result.error;
+        if (!error && rawItems.length > 0) {
+          const sanitizedItems = rawItems.map((it: Record<string, unknown>) => ({
+            ...sanitizeForSupabase('transaction_items', it),
+            transaction_id: sanitizedTx.id || data.id,
+          }));
+          const itemsResult = await client.from('transaction_items').upsert(sanitizedItems, { onConflict: 'id', ignoreDuplicates: false });
+          if (itemsResult.error) console.warn('[Sync] Failed to sync transaction items:', itemsResult.error);
+        }
+      } else {
+        const sanitized = sanitizeForSupabase(table_name, data);
+        const result = await table.upsert(sanitized, { onConflict: 'id', ignoreDuplicates: false });
+        error = result.error;
+      }
       break;
     }
     case 'update': {
-      const result = await table.upsert(data, { onConflict: 'id', ignoreDuplicates: false });
-      error = result.error;
+      if (table_name === 'transactions') {
+        const sanitizedTx = sanitizeForSupabase('transactions', data);
+        const result = await table.upsert(sanitizedTx, { onConflict: 'id', ignoreDuplicates: false });
+        error = result.error;
+      } else {
+        const sanitized = sanitizeForSupabase(table_name, data);
+        const result = await table.upsert(sanitized, { onConflict: 'id', ignoreDuplicates: false });
+        error = result.error;
+      }
       break;
     }
     case 'delete': {
@@ -352,6 +474,88 @@ async function syncTableFromRemote(client: SupabaseClient, db: Awaited<ReturnTyp
   }
 }
 
+let realtimeChannel: ReturnType<NonNullable<ReturnType<typeof getSupabase>>['channel']> | null = null;
+let backgroundHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+async function handleRealtimeChange(payload: { table: string; eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }) {
+  try {
+    const { table, eventType } = payload;
+    const config = TABLE_CONFIGS.find(c => c.table === table);
+    if (!config) return;
+
+    const db = await getDB();
+    if (eventType === 'DELETE') {
+      const id = payload.old?.id;
+      if (id) {
+        await db.delete(config.store, id as never);
+        notifyDataUpdated(table, 'DELETE', payload.old);
+      }
+    } else if (eventType === 'INSERT' || eventType === 'UPDATE') {
+      const record = payload.new;
+      if (record && record.id) {
+        await db.put(config.store, { ...record, sync_status: 'synced' } as never);
+        notifyDataUpdated(table, eventType, record);
+      }
+    }
+  } catch (err) {
+    console.warn('[Sync] Error processing realtime change:', err);
+  }
+}
+
+export function initRealtimeSync(): () => void {
+  const client = getSupabase();
+  if (!client || typeof window === 'undefined') return () => {};
+  if (realtimeChannel) return () => {};
+
+  try {
+    realtimeChannel = client
+      .channel('jimwas-multi-terminal-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public' },
+        (payload) => {
+          void handleRealtimeChange(payload as unknown as { table: string; eventType: string; new: Record<string, unknown>; old: Record<string, unknown> });
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Sync] Realtime channel connected for multi-terminal sync');
+        }
+      });
+  } catch (err) {
+    console.warn('[Sync] Realtime subscription init failed:', err);
+  }
+
+  return () => {
+    if (realtimeChannel && client) {
+      void client.removeChannel(realtimeChannel);
+      realtimeChannel = null;
+    }
+  };
+}
+
+export function initBackgroundSyncHeartbeat(intervalMs = 15000): () => void {
+  if (typeof window === 'undefined') return () => {};
+  if (backgroundHeartbeatTimer) return () => {};
+
+  backgroundHeartbeatTimer = setInterval(() => {
+    if (isOnline && !isSyncing && getSupabase()) {
+      void syncFromRemote().then(() => {
+        notifyDataUpdated('*', 'heartbeat-pull');
+      }).catch(err => {
+        console.warn('[Sync] Background heartbeat pull warning:', err);
+      });
+    }
+  }, intervalMs);
+
+  return () => {
+    if (backgroundHeartbeatTimer) {
+      clearInterval(backgroundHeartbeatTimer);
+      backgroundHeartbeatTimer = null;
+    }
+  };
+}
+
 async function syncFromRemote() {
   const client = getSupabase();
   if (!client) return;
@@ -365,6 +569,7 @@ async function syncFromRemote() {
     }
   }
   syncState.lastPull = new Date().toISOString();
+  notifyDataUpdated('*', 'remote-pull');
 }
 
 export async function syncNow(): Promise<{ success: boolean; message: string }> {
@@ -404,12 +609,13 @@ export function queueForSync(tableName: string, operation: 'insert' | 'update' |
 
 // Generic sync helpers
 async function syncInsert(table: string, data: unknown): Promise<void> {
+  const sanitized = sanitizeForSupabase(table, data as Record<string, unknown>);
   if (!isOnline || !getSupabase()) {
     queueForSync(table, 'insert', data);
     return;
   }
   try {
-    const { error } = await getSupabase()!.from(table).insert(data as Record<string, unknown>);
+    const { error } = await getSupabase()!.from(table).insert(sanitized);
     if (error) throw error;
   } catch {
     queueForSync(table, 'insert', data);
@@ -417,12 +623,13 @@ async function syncInsert(table: string, data: unknown): Promise<void> {
 }
 
 async function syncUpdate(table: string, data: unknown): Promise<void> {
+  const sanitized = sanitizeForSupabase(table, data as Record<string, unknown>);
   if (!isOnline || !getSupabase()) {
     queueForSync(table, 'update', data);
     return;
   }
   try {
-    const { error } = await getSupabase()!.from(table).upsert(data as Record<string, unknown>);
+    const { error } = await getSupabase()!.from(table).upsert(sanitized, { onConflict: 'id' });
     if (error) throw error;
   } catch {
     queueForSync(table, 'update', data);
@@ -434,21 +641,29 @@ export const syncInsertCustomer = (customer: unknown) => syncInsert('customers',
 export const syncUpdateCustomer = (customer: unknown) => syncUpdate('customers', customer);
 
 export async function syncInsertTransaction(transaction: unknown, items: unknown[]) {
+  const rawTx = transaction as Record<string, unknown>;
+  const sanitizedTx = sanitizeForSupabase('transactions', rawTx);
+  const rawItems = Array.isArray(items) ? items : (Array.isArray(rawTx.items) ? rawTx.items : []);
+  const sanitizedItems = rawItems.map((it: Record<string, unknown>) => ({
+    ...sanitizeForSupabase('transaction_items', it),
+    transaction_id: sanitizedTx.id || rawTx.id,
+  }));
+
   if (!isOnline || !getSupabase()) {
-    queueForSync('transactions', 'insert', transaction);
-    items.forEach(item => queueForSync('transaction_items', 'insert', item));
+    queueForSync('transactions', 'insert', rawTx);
+    rawItems.forEach(item => queueForSync('transaction_items', 'insert', item));
     return;
   }
   try {
-    const { error: txError } = await getSupabase()!.from('transactions').insert(transaction as Record<string, unknown>);
+    const { error: txError } = await getSupabase()!.from('transactions').insert(sanitizedTx);
     if (txError) throw txError;
-    if (items.length > 0) {
-      const { error: itemsError } = await getSupabase()!.from('transaction_items').insert(items as Record<string, unknown>[]);
+    if (sanitizedItems.length > 0) {
+      const { error: itemsError } = await getSupabase()!.from('transaction_items').insert(sanitizedItems);
       if (itemsError) throw itemsError;
     }
   } catch {
-    queueForSync('transactions', 'insert', transaction);
-    items.forEach(item => queueForSync('transaction_items', 'insert', item));
+    queueForSync('transactions', 'insert', rawTx);
+    rawItems.forEach(item => queueForSync('transaction_items', 'insert', item));
   }
 }
 

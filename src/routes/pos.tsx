@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Plus, Minus, Trash2, Search, User, ShoppingCart, Banknote, Smartphone, Landmark, X, Package, Archive, ArchiveRestore, Loader2, CheckCircle2, XCircle, AlertCircle, Clock, FlaskConical, Zap, Printer } from 'lucide-react';
 import { generateId, saveProduct, getAllProducts, getAllCustomers, saveCustomer, getKCBSettings, getBusinessSettings, getReceiptSettings, getTransaction, getAllPaymentAccounts } from '../lib/db';
-import { syncInsertCustomer, syncInsertProduct, getSupabase, getOnlineStatus } from '../lib/sync';
+import { syncInsertCustomer, syncInsertProduct, getSupabase, getOnlineStatus, subscribeToDataChanges } from '../lib/sync';
 import { logSaleCompleted, logCustomerCreated } from '../lib/audit';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
@@ -78,6 +78,13 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
     loadSavedCart();
     // Load parked sales on mount
     loadSavedParkedSales();
+
+    const unsubscribe = subscribeToDataChanges(({ table }) => {
+      if (['products', 'customers', 'payment_accounts', 'business_settings', '*'].includes(table)) {
+        loadData();
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
   // Auto-save cart to IndexedDB whenever it changes (debounced)

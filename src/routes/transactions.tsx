@@ -11,6 +11,7 @@ import { printReceipt } from '../lib/print';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { VoidTransactionModal } from '../components/VoidTransactionModal';
+import { subscribeToDataChanges } from '../lib/sync';
 import type { Transaction } from '../lib/types';
 
 interface UnifiedTransaction {
@@ -177,6 +178,13 @@ export function TransactionsPage() {
       setCanVoid(allowed);
     };
     initPage().finally(() => setIsLoading(false));
+
+    const unsubscribe = subscribeToDataChanges(({ table }) => {
+      if (['transactions', 'transaction_items', 'kcb_payments', '*'].includes(table)) {
+        loadTransactions();
+      }
+    });
+    return () => unsubscribe();
   }, [user?.role_code, loadTransactions]);
 
   // Filter whenever inputs change

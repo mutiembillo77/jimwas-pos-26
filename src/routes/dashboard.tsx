@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { TrendingUp, DollarSign, ShoppingCart, Users, CreditCard, Star, Calendar, Receipt, FileText, Printer, Download, Search, RefreshCw } from 'lucide-react';
 import { getAllTransactions, getAllCustomers, getAllInstallmentPlans, getAllProducts } from '../lib/db';
+import { subscribeToDataChanges } from '../lib/sync';
 import { KCBDashboardWidget } from '../components/MpesaDashboardWidget';
 import { TransactionReceiptPopover } from '../components/TransactionReceiptPopover';
 import type { Transaction, Customer, InstallmentPlan, Product } from '../lib/types';
@@ -21,6 +22,13 @@ export function DashboardPage() {
 
   useEffect(() => {
     loadData();
+
+    const unsubscribe = subscribeToDataChanges(({ table }) => {
+      if (['transactions', 'customers', 'installment_plans', 'products', '*'].includes(table)) {
+        loadData();
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
   const loadData = async () => {
