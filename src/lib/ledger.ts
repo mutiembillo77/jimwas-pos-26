@@ -4,7 +4,6 @@ import {
   getAllTransactions,
   getAllInstallmentPayments,
   getAllLoyaltyTransactions,
-  getBusinessSettings,
   saveLedgerEntry,
   getAllLedgerEntries,
   getAllExpenseCategories,

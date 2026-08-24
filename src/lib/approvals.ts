@@ -1,10 +1,10 @@
 // Approval Workflow Engine - Handle approval requests for high-risk actions
 
-import { generateId, saveApprovalRequest, getApprovalRequest, getAllApprovalRequests, getApprovalRequestsByStatus, getApprovalRequestsByRequester, saveApprovalHistory, saveVoidRequest, getVoidRequest, saveRefundRequest, getRefundRequest, getVoidRequestsByStatus, getRefundRequestsByStatus, getTransaction, getAllProducts, saveProduct, saveTransaction } from './db';
+import { generateId, saveApprovalRequest, getApprovalRequest, getApprovalRequestsByStatus, getApprovalRequestsByRequester, saveApprovalHistory, saveVoidRequest, saveRefundRequest, getVoidRequestsByStatus, getRefundRequestsByStatus, getTransaction, getAllProducts, saveProduct, saveTransaction } from './db';
 import { getCurrentUser } from './auth';
 import { canPerformWithoutApproval } from './permissions';
 import { logApprovalRequested, logApprovalApproved, logApprovalRejected, logSaleVoided, logSaleRefunded } from './audit';
-import type { ApprovalRequest, ApprovalRequestStatus, ApprovalRequestType, RoleCode } from './security-types';
+import type { ApprovalRequest, ApprovalRequestType, RoleCode } from './security-types';
 
 // Get applicable approver roles for an action type
 export function getApproverRoles(actionType: ApprovalRequestType): RoleCode[] {
@@ -311,7 +311,7 @@ export async function voidTransactionDirect(transactionId: string, reason: strin
 }
 
 // Execute void
-async function executeVoid(request: ApprovalRequest, data: Record<string, unknown>): Promise<void> {
+async function executeVoid(request: ApprovalRequest, _data?: Record<string, unknown>): Promise<void> {
   const transactionId = request.entity_id;
   const { getTransaction, saveTransaction, getAllProducts, saveProduct } = await import('./db');
 

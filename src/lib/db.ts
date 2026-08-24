@@ -452,7 +452,7 @@ export async function getDB(): Promise<IDBPDatabase<POSDatabase>> {
   if (dbInstance) return dbInstance;
 
   dbInstance = await openDB<POSDatabase>(DB_NAME, DB_VERSION, {
-    upgrade(db, oldVersion, newVersion, transaction) {
+    upgrade(db, oldVersion, _newVersion, transaction) {
       if (oldVersion < 11 && db.objectStoreNames.contains('users')) {
         const userStore = transaction.objectStore('users');
         if (!userStore.indexNames.contains('by-auth-user-id')) {
@@ -1222,7 +1222,7 @@ export async function getSecurityEventsByUser(userId: string): Promise<SecurityE
 
 export async function getUnresolvedSecurityEvents(): Promise<SecurityEvent[]> {
   const db = await getDB();
-  return db.getAllFromIndex('security_events', 'by-resolved', false);
+  return db.getAllFromIndex('security_events', 'by-resolved', IDBKeyRange.only(0));
 }
 
 // Price change history operations

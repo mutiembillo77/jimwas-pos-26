@@ -1,7 +1,7 @@
 // Auth Context - Provide authentication state to React components
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import type { User } from '../lib/security-types';
+import type { User, RoleCode } from '../lib/security-types';
 import { getCurrentUser, login as authLogin, logout as authLogout, initializeSecurity, requestPasswordReset, resendConfirmationEmail } from '../lib/auth';
 import { clearOfflineAuthSnapshot } from '../lib/db';
 import { clearAllPermissionCache } from '../lib/permissions';
@@ -176,7 +176,7 @@ export function PermissionGuard({ permission, requireAll = false, children, fall
         return;
       }
 
-      const { hasPermission: checkSingle, hasAnyPermission, hasAllPermissions } = await import('../lib/permissions');
+      const { hasAnyPermission, hasAllPermissions } = await import('../lib/permissions');
 
       const permissions = Array.isArray(permission) ? permission : [permission];
 

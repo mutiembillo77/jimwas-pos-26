@@ -67,7 +67,7 @@ export class KcbBuniMpesaService implements PaymentProvider {
       amount: request.amount,
       invoiceNumber: request.invoiceNumber,
       sharedShortCode: !!request.sharedShortCode,
-      orgShortCode: request.orgShortCode || '',
+      orgShortCode: request.orgShortCode || this.shortCode || '',
       orgPassKey: request.orgPassKey || '',
       callbackUrl: request.callbackUrl || this.callbackUrl,
       transactionDescription: request.transactionDescription || 'Payment',
@@ -131,6 +131,7 @@ export class KcbBuniMpesaService implements PaymentProvider {
       callbackMetadata,
       raw: stkCallback,
       receivedAt,
+      status: resultCode === 0 ? 'SUCCESS' : 'FAILED',
     };
 
     return normalized;

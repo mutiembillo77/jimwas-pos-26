@@ -1,19 +1,12 @@
 // Audit Page - View and filter audit logs
 
 import { useState, useEffect } from 'react';
-import { RoleGuard } from '../context/AuthContext';
 import {
-  FileText, Filter, Calendar, User, Package, ShoppingCart, Users as UsersIcon,
-  Shield, RefreshCw, Download, Search, ChevronDown, ChevronUp, AlertTriangle
+  FileText, Package, ShoppingCart, Users as UsersIcon,
+  Shield, Download, Search, ChevronDown, ChevronUp
 } from 'lucide-react';
-import { getAuditLogs, getAuditSummary } from '../lib/audit';
+import { getAuditLogs } from '../lib/audit';
 import type { AuditLog, AuditEventType } from '../lib/security-types';
-
-interface AuditLogFilters {
-  dateFrom?: string;
-  dateTo?: string;
-  eventType?: AuditEventType;
-}
 
 export function AuditPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);

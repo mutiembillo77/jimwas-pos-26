@@ -1285,7 +1285,6 @@ function UserModal({
   const [saving, setSaving] = useState(false);
   const [resettingPassword, setResettingPassword] = useState(false);
   const [changingOwnPassword, setChangingOwnPassword] = useState(false);
-  const [showResetPassword, setShowResetPassword] = useState(false);
   const [showOwnPassword, setShowOwnPassword] = useState(false);
   const [error, setError] = useState('');
   const [resetMessage, setResetMessage] = useState('');

@@ -1,6 +1,6 @@
 // Security Monitoring - Detect and flag suspicious activities
 
-import { generateId, saveSecurityEvent, getAllSecurityEvents, getSecurityEventsByUser, getUnresolvedSecurityEvents, getAllAuditLogs, getLoginHistoryByUser, getAllLoginHistory, getApprovalRequestsByStatus, getVoidRequestsByStatus, getRefundRequestsByStatus, getAllPriceChangeHistory, getAllStockAdjustments } from './db';
+import { generateId, saveSecurityEvent, getAllSecurityEvents, getAllLoginHistory, getVoidRequestsByStatus, getRefundRequestsByStatus, getAllPriceChangeHistory, getAllStockAdjustments } from './db';
 import type { SecurityEvent, SecurityEventType, SecurityEventSeverity } from './security-types';
 
 function safeParseJson(json: string | null | undefined): Record<string, unknown> {

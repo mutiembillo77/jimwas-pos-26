@@ -79,7 +79,7 @@ export function RBACTransactionHistory() {
           created_at: txn.created_at,
           customer_name: txn.customer_name,
           customer_phone: txn.customer_phone,
-          cashier_name: user?.name,
+          cashier_name: user?.full_name || user?.username,
         },
       });
 

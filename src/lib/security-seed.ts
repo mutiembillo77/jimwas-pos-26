@@ -31,7 +31,7 @@ export function initializeSecurityData(): Promise<void> {
 async function initializeSecurityDataOnce(): Promise<void> {
   console.log('Checking security initialization...');
 
-  const db = await getDB();
+  await getDB();
 
   // Initialize permissions (only if not exists)
   const existingPerms = await getAllPermissions();

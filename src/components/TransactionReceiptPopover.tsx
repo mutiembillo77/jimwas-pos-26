@@ -1,5 +1,5 @@
 import React from 'react';
-import { Receipt, Calendar, User, CreditCard, ShoppingBag, CheckCircle2, ShieldAlert, Sparkles, Hash, Phone } from 'lucide-react';
+import { Receipt, Calendar, User, CreditCard, ShoppingBag, Sparkles, Hash, Phone } from 'lucide-react';
 import type { Transaction, Customer } from '../lib/types';
 import { resolvePaymentAccountDetails, maskPhoneNumber } from '../lib/print';
 

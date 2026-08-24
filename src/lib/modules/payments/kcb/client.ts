@@ -7,7 +7,6 @@ import type {
   STKPushRequest,
   STKPushResponse,
   STKPushPayload,
-  IPNPayload,
   HealthCheckResponse,
   PaymentStatus,
 } from './types';
@@ -167,7 +166,7 @@ export class KCBClient {
         receipt: data.MpesaReceiptNumber,
         resultCode: data.ResultCode,
         resultDesc: data.ResultDesc,
-      } as PaymentStatus;
+      } as unknown as PaymentStatus;
     } catch (error) {
       if (error instanceof KCBPaymentError) {
         throw error;
@@ -187,7 +186,7 @@ export class KCBClient {
     const timestamp = new Date().toISOString();
 
     try {
-      const config = getKCBConfig();
+      getKCBConfig();
       const oauthHealthy = await this.checkOAuthHealth();
       
       // Note: Database health check would be done separately
@@ -215,7 +214,7 @@ export class KCBClient {
    */
   async validate(): Promise<boolean> {
     try {
-      const config = getKCBConfig();
+      getKCBConfig();
 
       // Test OAuth
       const token = await getAccessToken();

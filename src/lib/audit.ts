@@ -1,6 +1,6 @@
 // Audit Trail Engine - Immutable logging for all critical actions
 
-import { generateId, saveAuditLog, getAllAuditLogs, getAuditLogsByUser, getAuditLogsByEntity, getAuditLogsByEventType } from './db';
+import { generateId, saveAuditLog, getAllAuditLogs } from './db';
 import { getCurrentUser } from './auth';
 import type { AuditLog, AuditEventType, RoleCode } from './security-types';
 

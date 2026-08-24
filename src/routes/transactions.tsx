@@ -3,17 +3,15 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Search, Filter, Download, Printer, Trash2, RefreshCw, TrendingUp, TrendingDown,
-  Clock, CheckCircle2, XCircle, AlertCircle, Smartphone, DollarSign, Banknote, CreditCard
+  Search, Printer, Trash2, RefreshCw, TrendingUp, TrendingDown,
+  AlertCircle, Smartphone, DollarSign, Banknote
 } from 'lucide-react';
 import { getAllTransactions, getBusinessSettings, getReceiptSettings, getTransaction, getAllKCBPayments } from '../lib/db';
 import { printReceipt } from '../lib/print';
-import { hasPermission } from '../lib/permissions';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { VoidTransactionModal } from '../components/VoidTransactionModal';
 import type { Transaction } from '../lib/types';
-import type { KCBPaymentRecord } from '../lib/db';
 
 interface UnifiedTransaction {
   id: string;

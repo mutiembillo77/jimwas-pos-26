@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, Minus, Trash2, Search, User, ShoppingCart, Banknote, Smartphone, Landmark, X, Package, Archive, ArchiveRestore, Loader2, CheckCircle2, XCircle, AlertCircle, Clock, FlaskConical, Zap, Printer, Truck } from 'lucide-react';
+import { Plus, Minus, Trash2, Search, User, ShoppingCart, Banknote, Smartphone, Landmark, X, Package, Archive, ArchiveRestore, Loader2, CheckCircle2, XCircle, AlertCircle, Clock, FlaskConical, Zap, Printer } from 'lucide-react';
 import { generateId, saveProduct, getAllProducts, getAllCustomers, saveCustomer, getKCBSettings, getBusinessSettings, getReceiptSettings, getTransaction, getAllPaymentAccounts } from '../lib/db';
 import { syncInsertCustomer, syncInsertProduct, getSupabase, getOnlineStatus } from '../lib/sync';
 import { logSaleCompleted, logCustomerCreated } from '../lib/audit';
@@ -13,7 +13,7 @@ import { SaleTypeSelector } from '../components/SaleTypeSelector';
 import { createDelivery } from '../lib/enterprise';
 import type { Product, Customer, CartItem, SaleType } from '../lib/types';
 import type { PaymentAccount } from '../lib/settings-types';
-import { PaymentMethod, PaymentTiming, isProviderActive, getPaymentDisplayName } from '../types/payment';
+import { PaymentMethod, PaymentTiming } from '../types/payment';
 
 const LOYALTY_POINTS_PER_SHILLING = 100;
 

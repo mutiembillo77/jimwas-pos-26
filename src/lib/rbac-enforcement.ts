@@ -1,7 +1,7 @@
 // RBAC Enforcement - System-wide permission checks and enforcement
 
 import { User } from './security-types';
-import { hasPermission, hasAnyPermission, hasAllPermissions } from './permissions';
+import { hasAnyPermission, hasAllPermissions } from './permissions';
 import { ROUTE_CONFIG, FEATURE_CONFIG, COMPONENT_CONFIG } from './rbac-config';
 
 /**

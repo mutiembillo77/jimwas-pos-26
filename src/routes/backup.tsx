@@ -1,11 +1,10 @@
 // Backup & Restore Page - Export and import data
 
 import { useState, useRef, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { RoleGuard } from '../context/AuthContext';
+import { useAuth, RoleGuard } from '../context/AuthContext';
 import {
-  Download, Upload, Database, AlertTriangle, Check, FileJson, Clock,
-  HardDrive, RefreshCw, Trash2, Archive, Shield
+  Download, Upload, Database, AlertTriangle, Check, FileJson,
+  HardDrive, RefreshCw, Trash2
 } from 'lucide-react';
 import {
   exportBackup,

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { RoleGuard } from '../context/AuthContext';
+import { useAuth, RoleGuard } from '../context/AuthContext';
 import {
   Shield, AlertTriangle, Users, Activity, Clock, CheckCircle, XCircle,
   ArrowRight, FileWarning, DollarSign, Package, TrendingUp, Lock
@@ -8,7 +7,7 @@ import {
 import { getSecurityDashboardSummary, resolveSecurityEvent } from '../lib/security-monitor';
 import { getAuditSummary } from '../lib/audit';
 import { getPendingApprovalsForUser } from '../lib/approvals';
-import type { SecurityEvent, AuditLog, ApprovalRequest } from '../lib/security-types';
+import type { SecurityEvent, ApprovalRequest } from '../lib/security-types';
 
 interface SecuritySummary {
   unresolvedEvents: number;

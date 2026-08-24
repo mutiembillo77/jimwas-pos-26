@@ -1,7 +1,7 @@
 // Permission Service for RBAC - Permission checks and authorization
 
-import { getUser, getRole, getAllRoles, getPermission, getAllPermissions } from './db';
-import type { User, Role, Permission, RoleCode } from './security-types';
+import { getUser, getRole, getAllRoles, getAllPermissions } from './db';
+import type { Role, RoleCode } from './security-types';
 
 // Cache for user permissions (in-memory cache for performance)
 const permissionCache = new Map<string, Set<string>>();

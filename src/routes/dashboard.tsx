@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { TrendingUp, DollarSign, ShoppingCart, Users, CreditCard, Star, Calendar, Receipt, FileText, Printer, Download, Search, RefreshCw } from 'lucide-react';
 import { getAllTransactions, getAllCustomers, getAllInstallmentPlans, getAllProducts } from '../lib/db';
-import { getTodaySummary, getWeekSummary, getMonthSummary, formatCurrency } from '../lib/ledger';
 import { KCBDashboardWidget } from '../components/MpesaDashboardWidget';
 import { TransactionReceiptPopover } from '../components/TransactionReceiptPopover';
 import type { Transaction, Customer, InstallmentPlan, Product } from '../lib/types';
@@ -169,11 +168,6 @@ export function DashboardPage() {
     reportWindow.focus();
     if (print) window.setTimeout(() => reportWindow.print(), 500);
   };
-
-  const lowStockProducts = products.filter(
-    (p) => p.stock > 0 && p.stock <= (p.low_stock_alert || 5)
-  );
-  const outOfStockProducts = products.filter((p) => p.stock === 0);
 
   return (
     <div className="space-y-6">

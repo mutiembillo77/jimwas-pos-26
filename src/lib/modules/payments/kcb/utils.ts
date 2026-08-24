@@ -3,7 +3,6 @@
  */
 
 import { VALIDATION_RULES } from './constants';
-import { KCBPaymentError, ErrorCode } from './types';
 
 /**
  * Generate a unique message ID (UUID-like)
