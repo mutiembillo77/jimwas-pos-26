@@ -275,12 +275,14 @@ export async function login(identifier: string, password: string): Promise<Login
   }
 
   try {
+    console.log('[AUTH DEBUG] signInWithPassword started');
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
     if (authError) {
+      console.log('[AUTH DEBUG] signInWithPassword error:', authError.message, 'status:', authError.status);
       const msg = authError.message.toLowerCase();
       if (msg.includes('email not confirmed') || (authError.status === 400 && msg.includes('confirm'))) {
         await logLoginAttempt('', email, false, 'Email not confirmed');
@@ -301,6 +303,12 @@ export async function login(identifier: string, password: string): Promise<Login
       return { success: false, error: authError.message || 'Login failed. Please try again.' };
     }
 
+    console.log('[AUTH DEBUG] signInWithPassword succeeded');
+    console.log('[AUTH DEBUG] session exists:', !!authData.session);
+    console.log('[AUTH DEBUG] user exists:', !!authData.user);
+    console.log('[AUTH DEBUG] user id exists:', !!authData.user?.id);
+    console.log('[AUTH DEBUG] session expires:', authData.session?.expires_at ?? 'n/a');
+
     if (!authData.user) {
       return { success: false, error: 'Authentication returned no active user.' };
     }
@@ -309,39 +317,51 @@ export async function login(identifier: string, password: string): Promise<Login
     const authUserEmail = authData.user.email || email;
 
     // 1. Authoritative resolution: retrieve POS user profile strictly linked to this auth identity
+    console.log('[AUTH DEBUG] PROFILE_LOOKUP_START: searching local IndexedDB by auth_user_id');
     let posUser = await getUserByAuthUserId(authUserId);
+    console.log('[AUTH DEBUG] local IndexedDB result:', posUser ? `found (${posUser.username})` : 'not found');
 
     // 2. If not found locally, fetch from Supabase public.users strictly by auth_user_id
     if (!posUser) {
+      console.log('[AUTH DEBUG] PROFILE_LOOKUP: querying Supabase public.users by auth_user_id');
       try {
-        const { data: remoteUser } = await supabase
+        const { data: remoteUser, error: remoteError } = await supabase
           .from('users')
           .select('*')
           .eq('auth_user_id', authUserId)
           .maybeSingle();
 
+        console.log('[AUTH DEBUG] Supabase users query error:', remoteError ? remoteError.message : 'none');
+        console.log('[AUTH DEBUG] Supabase users query result:', remoteUser ? `found (${(remoteUser as User).username})` : 'not found');
+
         if (remoteUser) {
           posUser = remoteUser as User;
           await saveUser(posUser);
         }
-      } catch {
-        // Table query error or not found
+      } catch (queryErr) {
+        console.warn('[AUTH DEBUG] Supabase users query threw:', queryErr instanceof Error ? queryErr.message : queryErr);
       }
     }
 
     // 3. Controlled legacy fallback: only link if profile has NO existing auth_user_id bound
     if (!posUser) {
+      console.log('[AUTH DEBUG] PROFILE_LOOKUP: attempting legacy email-based link for', authUserEmail);
       posUser = await linkUnboundLegacyProfile(authUserId, authUserEmail);
+      console.log('[AUTH DEBUG] legacy link result:', posUser ? `linked (${posUser.username})` : 'no linkable profile found');
     }
 
     // 4. Check if a POS profile exists
     if (!posUser) {
+      console.warn('[AUTH DEBUG] PROFILE_LOOKUP_FAILED: no public.users row exists for auth_user_id =', authUserId.slice(0, 8) + '...');
+      console.warn('[AUTH DEBUG] FIX REQUIRED: Run migration 20260824000000 to backfill public.users from auth.users');
       await logLoginAttempt(authUserId, authUserEmail, false, 'No associated POS employee profile');
       return {
         success: false,
         error: 'Authenticated successfully, but no POS employee profile is associated with this account. Please contact an administrator.',
       };
     }
+
+    console.log('[AUTH DEBUG] PROFILE_LOOKUP_SUCCESS: user=', posUser.username, 'role=', posUser.role_code, 'active=', posUser.is_active);
 
     // 5. Check if active
     if (!posUser.is_active) {
@@ -363,8 +383,10 @@ export async function login(identifier: string, password: string): Promise<Login
     await logAuthSecurityEvent('ONLINE_LOGIN', posUser.id, `User ${posUser.username} logged in online`, 'low');
     const snapshot = await recordOfflineAuthSnapshot(posUser);
 
+    console.log('[AUTH DEBUG] AUTH_CONTEXT_READY: login complete, returning success');
     return { success: true, user: posUser, snapshot: snapshot || undefined };
   } catch (error) {
+    console.error('[AUTH DEBUG] Unexpected exception in login:', error instanceof Error ? error.message : error);
     if (isNetworkOrTransportError(error)) {
       return { success: false, error: 'Network unavailable. Online connection required for primary authentication.' };
     }

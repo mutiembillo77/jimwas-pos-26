@@ -72,15 +72,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let authSubscription: { unsubscribe: () => void } | null = null;
     if (supabase) {
       const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log('[AUTH DEBUG] onAuthStateChange event:', event, '| session exists:', !!session);
         if (event === 'SIGNED_OUT' || !session) {
           // Explicit signout or missing session invalidates local authorization snapshot
           await clearOfflineAuthSnapshot();
           if (isMounted) {
+            console.log('[AUTH DEBUG] Setting user to null (SIGNED_OUT or no session)');
             setUser(null);
             clearAllPermissionCache();
           }
         } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+          console.log('[AUTH DEBUG] Fetching fresh POS user profile after', event);
           const freshUser = await getCurrentUser();
+          console.log('[AUTH DEBUG] Fresh user from getCurrentUser:', freshUser ? `${freshUser.username} (${freshUser.role_code})` : 'null');
           if (isMounted) {
             setUser(freshUser);
             clearAllPermissionCache();
@@ -104,8 +108,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (identifier: string, password: string) => {
+    console.log('[AUTH DEBUG] AuthContext.login called');
     const result = await authLogin(identifier, password);
+    console.log('[AUTH DEBUG] AuthContext.login result: success=', result.success, result.error ? 'error=' + result.error : '');
     if (result.success && result.user) {
+      console.log('[AUTH DEBUG] AuthContext setting user:', result.user.username, '| role:', result.user.role_code);
       setUser(result.user);
       clearAllPermissionCache();
     }
