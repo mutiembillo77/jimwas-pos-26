@@ -118,18 +118,23 @@ END $$;
 -- ============================================================================
 
 DO $$ BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name   = 'mpesa_transactions'
-      AND column_name  = 'initiator_user_id'
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'mpesa_transactions'
   ) THEN
-    ALTER TABLE public.mpesa_transactions
-      ADD COLUMN initiator_user_id TEXT;
-    COMMENT ON COLUMN public.mpesa_transactions.initiator_user_id IS
-      'Server-verified POS user identity (public.users.id). Set by Edge Function from JWT.';
-    CREATE INDEX IF NOT EXISTS idx_mpesa_transactions_initiator
-      ON public.mpesa_transactions(initiator_user_id);
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name   = 'mpesa_transactions'
+        AND column_name  = 'initiator_user_id'
+    ) THEN
+      ALTER TABLE public.mpesa_transactions
+        ADD COLUMN initiator_user_id TEXT;
+      COMMENT ON COLUMN public.mpesa_transactions.initiator_user_id IS
+        'Server-verified POS user identity (public.users.id). Set by Edge Function from JWT.';
+      CREATE INDEX IF NOT EXISTS idx_mpesa_transactions_initiator
+        ON public.mpesa_transactions(initiator_user_id);
+    END IF;
   END IF;
 END $$;
 
