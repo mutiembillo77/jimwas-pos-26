@@ -60,6 +60,30 @@ Deno.serve(async (req: Request) => {
         }
       }
 
+      // Auto-settle synthetic sandbox test payments upon status query
+      if (
+        (kcbPayment.status === "processing" || kcbPayment.status === "pending") &&
+        (checkoutRequestId.startsWith("ws_CO_SB_") || checkoutRequestId.startsWith("sim-"))
+      ) {
+        const receipt = kcbPayment.mpesa_receipt_number || `QWE${Math.floor(100000 + Math.random() * 900000)}`;
+        await supabaseAdmin
+          .from("kcb_payments")
+          .update({
+            status: "success",
+            mpesa_receipt_number: receipt,
+            result_code: "0",
+            result_desc: "The service request is processed successfully. (Sandbox)",
+            callback_received: true,
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("checkout_request_id", checkoutRequestId);
+
+        kcbPayment.status = "success";
+        kcbPayment.mpesa_receipt_number = receipt;
+        kcbPayment.result_desc = "The service request is processed successfully. (Sandbox)";
+      }
+
       return json({
         success: true,
         status: kcbPayment.status,

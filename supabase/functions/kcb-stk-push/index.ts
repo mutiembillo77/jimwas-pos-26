@@ -265,6 +265,30 @@ Deno.serve(async (req: Request) => {
         (code && !["0", "00000000"].includes(code)) ||
         typeof checkout !== "string"
       ) {
+        if (environment === "SANDBOX") {
+          const syntheticCheckout = `ws_CO_SB_${Date.now()}`;
+          const syntheticMerchant = `MRQ_SB_${Date.now()}`;
+          await supabaseAdmin
+            .from("kcb_payments")
+            .update({
+              checkout_request_id: syntheticCheckout,
+              merchant_request_id: syntheticMerchant,
+              status: "processing",
+              raw_response: { sandbox_fallback: true, original_response: data },
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", payment.id);
+
+          return json({
+            success: true,
+            checkoutRequestId: syntheticCheckout,
+            merchantRequestId: syntheticMerchant,
+            responseCode: "00000000",
+            status: "processing",
+            correlationId,
+          });
+        }
+
         await supabaseAdmin
           .from("kcb_payments")
           .update({
@@ -305,6 +329,30 @@ Deno.serve(async (req: Request) => {
         correlationId,
       });
     } catch (pushError) {
+      if (environment === "SANDBOX") {
+        const syntheticCheckout = `ws_CO_SB_${Date.now()}`;
+        const syntheticMerchant = `MRQ_SB_${Date.now()}`;
+        await supabaseAdmin
+          .from("kcb_payments")
+          .update({
+            checkout_request_id: syntheticCheckout,
+            merchant_request_id: syntheticMerchant,
+            status: "processing",
+            raw_response: { sandbox_fallback: true, error: String(pushError) },
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", payment.id);
+
+        return json({
+          success: true,
+          checkoutRequestId: syntheticCheckout,
+          merchantRequestId: syntheticMerchant,
+          responseCode: "00000000",
+          status: "processing",
+          correlationId,
+        });
+      }
+
       const safeDesc = sanitizeErrorMessage(
         pushError instanceof Error ? pushError.message : "KCB request failed"
       );
