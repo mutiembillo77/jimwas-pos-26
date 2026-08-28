@@ -1,70 +1,104 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "npm:@supabase/supabase-js@2.39.3";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
-};
+import {
+  authenticateAndAuthorize,
+  json,
+  PAYMENT_CORS_HEADERS,
+  sanitizeErrorMessage,
+} from "../lib/auth.ts";
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
-  if (req.method !== "POST") return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 200, headers: PAYMENT_CORS_HEADERS });
+  }
+  if (req.method !== "POST") {
+    return json({ error: "Method not allowed" }, 405);
+  }
+
+  // 1. Authenticate & Authorize
+  const authResult = await authenticateAndAuthorize(req, "payments.status");
+  if (authResult instanceof Response) {
+    return authResult;
+  }
+  const { posUser, supabaseAdmin, permissions } = authResult;
 
   try {
-    const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "");
-    const { checkoutRequestId } = await req.json();
-
-    if (!checkoutRequestId) {
-      return new Response(JSON.stringify({ error: "checkoutRequestId is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    let rawBody: Record<string, unknown>;
+    try {
+      rawBody = await req.json();
+    } catch {
+      return json({ error: "Invalid JSON request body" }, 400);
     }
 
-    // Try kcb_payments first (KCB BUNI flow)
-    const { data: kcbPayment, error: kcbError } = await supabase
+    const checkoutRequestId =
+      typeof rawBody.checkoutRequestId === "string"
+        ? rawBody.checkoutRequestId.trim()
+        : "";
+
+    if (!checkoutRequestId) {
+      return json({ error: "checkoutRequestId is required" }, 400);
+    }
+
+    const isElevated =
+      posUser.role_code === "admin" ||
+      posUser.role_code === "administrator" ||
+      posUser.role_code === "manager" ||
+      permissions.has("payments.manage");
+
+    // 2. Try kcb_payments first
+    const { data: kcbPayment, error: kcbError } = await supabaseAdmin
       .from("kcb_payments")
-      .select("*")
+      .select("status, mpesa_receipt_number, result_desc, error_message, initiator_user_id, cashier_id")
       .eq("checkout_request_id", checkoutRequestId)
       .maybeSingle();
 
     if (!kcbError && kcbPayment) {
-      return new Response(JSON.stringify({
+      // Ownership check for cashiers
+      if (!isElevated) {
+        const ownerId = kcbPayment.initiator_user_id || kcbPayment.cashier_id;
+        if (ownerId && ownerId !== posUser.id) {
+          return json({ error: "Forbidden: Not authorized to view this transaction" }, 403);
+        }
+      }
+
+      return json({
         success: true,
         status: kcbPayment.status,
         mpesaReceiptNumber: kcbPayment.mpesa_receipt_number,
         resultDesc: kcbPayment.result_desc || kcbPayment.error_message,
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      });
     }
 
-    // Fall back to mpesa_transactions (legacy Safaricom Daraja flow)
-    const { data: mpesaTx, error: txError } = await supabase
+    // 3. Fall back to mpesa_transactions
+    const { data: mpesaTx, error: txError } = await supabaseAdmin
       .from("mpesa_transactions")
-      .select("*")
+      .select("status, mpesa_receipt_number, result_desc, callback_received, initiator_user_id")
       .eq("checkout_request_id", checkoutRequestId)
       .maybeSingle();
 
     if (txError || !mpesaTx) {
-      return new Response(JSON.stringify({ error: "Transaction not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return json({ error: "Transaction not found" }, 404);
     }
 
-    // If callback already resolved it, return from DB
-    if (mpesaTx.callback_received && mpesaTx.status !== "pending" && mpesaTx.status !== "processing") {
-      return new Response(JSON.stringify({
-        success: true,
-        status: mpesaTx.status,
-        mpesaReceiptNumber: mpesaTx.mpesa_receipt_number,
-        resultDesc: mpesaTx.result_desc,
-      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    // Ownership check for cashiers
+    if (!isElevated) {
+      const ownerId = mpesaTx.initiator_user_id;
+      if (ownerId && ownerId !== posUser.id) {
+        return json({ error: "Forbidden: Not authorized to view this transaction" }, 403);
+      }
     }
 
-    // Return current DB status (callback may not have arrived yet)
-    return new Response(JSON.stringify({
+    return json({
       success: true,
       status: mpesaTx.status || "pending",
       mpesaReceiptNumber: mpesaTx.mpesa_receipt_number,
-      resultDesc: mpesaTx.result_desc || "Waiting for callback",
-    }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      resultDesc: mpesaTx.result_desc || (mpesaTx.callback_received ? "Completed" : "Waiting for callback"),
+    });
   } catch (error) {
-    console.error("Status check error:", error);
-    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Failed to check status" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const safeMsg = sanitizeErrorMessage(
+      error instanceof Error ? error.message : "Failed to check status"
+    );
+    console.error("[mpesa-status] error:", safeMsg);
+    return json({ error: safeMsg }, 500);
   }
 });
+

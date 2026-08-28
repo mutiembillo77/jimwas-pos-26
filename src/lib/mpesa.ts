@@ -61,6 +61,18 @@ export interface STKPushStatusResponse {
   error?: string;
 }
 
+async function getAuthHeader(): Promise<string> {
+  try {
+    const { supabase } = await import('./supabaseClient');
+    if (supabase) {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (token) return `Bearer ${token}`;
+    }
+  } catch {}
+  return `Bearer ${SUPABASE_ANON_KEY}`;
+}
+
 // Initiate KCB BUNI STK Push
 export async function initiateKCBSTKPush(
   phone: string,
@@ -100,11 +112,12 @@ export async function initiateKCBSTKPush(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    const authHeader = await getAuthHeader();
     const response = await fetch(`${SUPABASE_URL}/functions/v1/kcb-stk-push`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Authorization': authHeader,
         'X-Idempotency-Key': idempotencyKey,
       },
       body: JSON.stringify(payload),
@@ -162,11 +175,12 @@ export async function initiateKCBSTKPush(
 // Check STK Push Status
 export async function checkSTKPushStatus(checkoutRequestId: string): Promise<STKPushStatusResponse> {
   try {
+    const authHeader = await getAuthHeader();
     const response = await fetch(`${SUPABASE_URL}/functions/v1/mpesa-status`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Authorization': authHeader,
       },
       body: JSON.stringify({ checkoutRequestId }),
     });

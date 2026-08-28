@@ -1,16 +1,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "npm:@supabase/supabase-js@2.39.3";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
-};
-
-// Sandbox UAT: directly simulates a successful M-Pesa callback by updating
-// the mpesa_transactions row to "success" with a generated receipt number.
-// The frontend polling picks up the status change and completes the sale.
-// This bypasses Daraja entirely — it's for UAT testing only.
+import {
+  authenticateAndAuthorize,
+  json,
+  PAYMENT_CORS_HEADERS,
+  resolveServerEnvironment,
+  sanitizeErrorMessage,
+} from "../lib/auth.ts";
 
 function generateReceiptNumber(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789";
@@ -23,36 +18,37 @@ function generateReceiptNumber(): string {
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    return new Response(null, { status: 200, headers: PAYMENT_CORS_HEADERS });
   }
   if (req.method !== "POST") {
-    return new Response(
-      JSON.stringify({ error: "Method not allowed" }),
-      { status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return json({ error: "Method not allowed" }, 405);
   }
 
+  // 1. Authenticate & Authorize
+  const authResult = await authenticateAndAuthorize(req, "payments.simulate");
+  if (authResult instanceof Response) {
+    return authResult;
+  }
+  const { posUser, supabaseAdmin } = authResult;
+
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
-    );
-
-    const { checkoutRequestId, phone, amount } = await req.json();
-
-    // Load settings — must be sandbox
-    const { data: settings } = await supabase
-      .from("mpesa_settings")
-      .select("environment, is_enabled")
-      .eq("id", "mpesa-settings")
-      .single();
-
-    if (!settings || settings.environment !== "sandbox") {
-      return new Response(
-        JSON.stringify({ error: "Simulation only available in sandbox environment" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    // 2. Strict Environment Check (server-side only)
+    const serverEnv = resolveServerEnvironment();
+    if (serverEnv !== "SANDBOX") {
+      return json(
+        { error: "Simulation is strictly forbidden in production environment" },
+        403
       );
     }
+
+    let rawBody: Record<string, unknown>;
+    try {
+      rawBody = await req.json();
+    } catch {
+      return json({ error: "Invalid JSON request body" }, 400);
+    }
+
+    const { checkoutRequestId, phone, amount } = rawBody;
 
     const receiptNumber = generateReceiptNumber();
     const now = new Date().toISOString();
@@ -66,7 +62,6 @@ Deno.serve(async (req: Request) => {
       String(txnDate.getSeconds()).padStart(2, "0"),
     ].join("");
 
-    // Build a fake callback payload matching Daraja's format
     const fakeCallback = {
       Body: {
         stkCallback: {
@@ -76,22 +71,25 @@ Deno.serve(async (req: Request) => {
           ResultDesc: "The service request is processed successfully.",
           CallbackMetadata: {
             Item: [
-              { Name: "Amount", Value: Math.round(amount) || 1 },
+              { Name: "Amount", Value: Math.round(Number(amount)) || 1 },
               { Name: "MpesaReceiptNumber", Value: receiptNumber },
               { Name: "TransactionDate", Value: formattedDate },
-              { Name: "PhoneNumber", Value: phone || "254708374149" },
+              { Name: "PhoneNumber", Value: String(phone || "254708374149") },
             ],
           },
         },
       },
     };
 
-    // Update the mpesa_transactions row
     let updatedTx = null;
 
-    if (checkoutRequestId && !checkoutRequestId.startsWith("sim-")) {
-      // Real checkout request ID from STK push — update the existing row
-      const { data, error } = await supabase
+    if (
+      typeof checkoutRequestId === "string" &&
+      checkoutRequestId.length > 0 &&
+      !checkoutRequestId.startsWith("sim-")
+    ) {
+      // Update existing record
+      const { data, error } = await supabaseAdmin
         .from("mpesa_transactions")
         .update({
           status: "success",
@@ -108,23 +106,20 @@ Deno.serve(async (req: Request) => {
         .single();
 
       if (error) {
-        console.error("Failed to update mpesa transaction:", error);
-        return new Response(
-          JSON.stringify({ error: "Failed to simulate: " + error.message }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        console.error("[mpesa-simulate] update error:", error.message);
+        return json({ error: "Failed to simulate transaction update" }, 500);
       }
       updatedTx = data;
     } else {
-      // No real checkout ID (STK push failed) — create a synthetic transaction
+      // Synthetic transaction in sandbox
       const syntheticId = `sim-${Date.now()}`;
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from("mpesa_transactions")
         .insert({
           checkout_request_id: syntheticId,
           merchant_request_id: "sim-" + Date.now(),
-          phone_number: phone || "254708374149",
-          amount: Math.round(amount) || 1,
+          phone_number: String(phone || "254708374149"),
+          amount: Math.round(Number(amount)) || 1,
           status: "success",
           result_code: "0",
           result_desc: "The service request is processed successfully.",
@@ -132,23 +127,21 @@ Deno.serve(async (req: Request) => {
           transaction_date: formattedDate,
           callback_received: true,
           callback_payload: fakeCallback,
+          initiator_user_id: posUser.id,
+          environment: "SANDBOX",
         })
         .select()
         .single();
 
       if (error) {
-        console.error("Failed to create simulated transaction:", error);
-        return new Response(
-          JSON.stringify({ error: "Failed to simulate: " + error.message }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        console.error("[mpesa-simulate] insert error:", error.message);
+        return json({ error: "Failed to create simulated transaction" }, 500);
       }
       updatedTx = data;
     }
 
-    // If linked to a POS transaction, mark it completed
     if (updatedTx?.transaction_id) {
-      const { error: txError } = await supabase
+      await supabaseAdmin
         .from("transactions")
         .update({
           status: "completed",
@@ -156,28 +149,20 @@ Deno.serve(async (req: Request) => {
           updated_at: now,
         })
         .eq("id", updatedTx.transaction_id);
-
-      if (txError) {
-        console.error("Failed to update linked transaction:", txError);
-      }
     }
 
-    console.log("Simulation complete:", { receipt: receiptNumber, checkoutId: checkoutRequestId });
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: "Payment simulated successfully",
-        receiptNumber,
-        checkoutRequestId,
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return json({
+      success: true,
+      message: "Payment simulated successfully",
+      receiptNumber,
+      checkoutRequestId: checkoutRequestId || updatedTx?.checkout_request_id,
+    });
   } catch (error) {
-    console.error("Simulate error:", error);
-    return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Simulation failed" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    const safeMsg = sanitizeErrorMessage(
+      error instanceof Error ? error.message : "Simulation failed"
     );
+    console.error("[mpesa-simulate] error:", safeMsg);
+    return json({ error: safeMsg }, 500);
   }
 });
+
