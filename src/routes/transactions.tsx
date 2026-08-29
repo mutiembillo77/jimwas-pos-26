@@ -119,17 +119,19 @@ export function TransactionsPage() {
   }, [toast]);
 
   const calculateStats = (transactions: UnifiedTransaction[]) => {
+    const successful = transactions.filter(t => t.status === 'completed' || t.status === 'success');
     const stats = {
       totalTransactions: transactions.length,
-      totalAmount: transactions.reduce((sum, t) => sum + t.amount, 0),
-      successCount: transactions.filter(t => t.status === 'completed' || t.status === 'success').length,
+      totalAmount: successful.reduce((sum, t) => sum + t.amount, 0),
+      successCount: successful.length,
       failedCount: transactions.filter(t => t.status === 'failed').length,
-      averageValue: transactions.length > 0 
-        ? transactions.reduce((sum, t) => sum + t.amount, 0) / transactions.length 
+      averageValue: successful.length > 0 
+        ? successful.reduce((sum, t) => sum + t.amount, 0) / successful.length 
         : 0,
     };
     setStats(stats);
   };
+
 
   const filterTransactions = useCallback(() => {
     let filtered = unifiedTransactions;

@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, AlertTriangle, Loader2 } from 'lucide-react';
 import { createApprovalRequest, voidTransactionDirect } from '../lib/approvals';
-import { canPerformWithoutApproval } from '../lib/permissions';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from './Toast';
 import type { Transaction } from '../lib/types';
@@ -94,17 +93,23 @@ export function VoidTransactionModal({ transaction, isOpen, onClose, onVoidCompl
 
     setIsLoading(true);
     try {
-      const permission = await canPerformWithoutApproval(user.id, 'SALE_VOID');
-      if (permission.canPerform && !permission.requiresApproval) {
+      // Use auth context role directly — avoids IndexedDB lookup failures on fresh sessions
+      const isAdmin = user.role_code === 'admin' || user.role_code === 'administrator';
+
+      if (isAdmin) {
         const result = await voidTransactionDirect(transaction.id, reason.trim(), user.id);
         if (result.success) {
           toast.show('Transaction voided and inventory restored', 'success');
           setReason('');
           onClose();
           onVoidComplete();
-        } else toast.show(result.error || 'Failed to void transaction', 'error');
+        } else {
+          toast.show(result.error || 'Failed to void transaction', 'error');
+        }
         return;
       }
+
+      // Non-admin: submit for approval
       const result = await createApprovalRequest({
         requestType: 'SALE_VOID',
         entityType: 'transaction',
@@ -134,6 +139,7 @@ export function VoidTransactionModal({ transaction, isOpen, onClose, onVoidCompl
       setIsLoading(false);
     }
   };
+
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">

@@ -330,6 +330,16 @@ export async function voidTransactionDirect(transactionId: string, reason: strin
     if (product) await saveProduct({ ...product, stock: product.stock + (item.quantity || 0), updated_at: new Date().toISOString(), sync_status: 'pending' });
   }
   await saveTransaction({ ...transaction, status: 'voided', notes: `Voided: ${reason}`, sync_status: 'pending' });
+  try {
+    const { supabase } = await import('./supabaseClient');
+    if (supabase) {
+      await supabase.from('transactions').update({ status: 'voided', notes: `Voided: ${reason}` }).eq('id', transactionId);
+    }
+    const { notifyDataUpdated } = await import('./sync');
+    notifyDataUpdated('transactions', 'update');
+  } catch {
+    // Cloud sync fallback
+  }
   await logSaleVoided(transactionId, reason, userId, transaction);
   return { success: true };
 }
@@ -369,6 +379,16 @@ async function executeVoid(request: ApprovalRequest, _data?: Record<string, unkn
     sync_status: 'pending' as const,
   };
   await saveTransaction(voidedTransaction);
+  try {
+    const { supabase } = await import('./supabaseClient');
+    if (supabase) {
+      await supabase.from('transactions').update({ status: 'voided', notes: `Voided: ${request.reason}` }).eq('id', transactionId);
+    }
+    const { notifyDataUpdated } = await import('./sync');
+    notifyDataUpdated('transactions', 'update');
+  } catch {
+    // Cloud sync fallback
+  }
 
   // Log void in audit
   await logSaleVoided(transactionId, request.reason, request.approver_id, transaction);
