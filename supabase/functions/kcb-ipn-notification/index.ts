@@ -5,7 +5,7 @@ type FinancialEnvironment = 'SANDBOX' | 'PRODUCTION';
 
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, X-KCB-Signature" };
 const ack = (body: unknown = { ResultCode: 0, ResultDesc: 'Success' }) => new Response(JSON.stringify(body), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-const statusFor = (code: unknown) => { const value = String(code ?? ''); if (value === '0' || value === '00000000') return 'success'; if (value === '1032' || value === '17') return 'cancelled'; if (value === '1001' || value === '20') return 'timeout'; if (value === '1' || value === '14') return 'insufficient_balance'; return 'failed'; };
+const statusFor = (code: unknown) => { const value = String(code ?? ''); if (value === '0' || value === '00000000') return 'PROVIDER_CONFIRMED_SUCCESS'; if (value === '1032' || value === '17') return 'cancelled'; if (value === '1001' || value === '20') return 'timeout'; if (value === '1' || value === '14') return 'insufficient_balance'; return 'failed'; };
 
 /**
  * Resolves the KCB provider environment from trusted server-side config.
@@ -65,11 +65,11 @@ Deno.serve(async (req: Request) => {
     }
 
     // Terminal state guard — already settled
-    if (payment.status === 'success') return ack();
+    if (payment.status === 'PROVIDER_CONFIRMED_SUCCESS' || payment.status === 'SANDBOX_SIMULATED_SUCCESS' || payment.status === 'success') return ack();
 
     const update: Record<string, unknown> = { status, result_code: String(resultCode ?? ''), result_desc: resultDesc, mpesa_receipt_number: receipt, transaction_date: transactionDate, callback_received: true, callback_payload: body, updated_at: new Date().toISOString() };
-    if (status === 'success') update.completed_at = new Date().toISOString();
-    const { error } = await supabase.from('kcb_payments').update(update).eq('id', payment.id).neq('status', 'success');
+    if (status === 'PROVIDER_CONFIRMED_SUCCESS') update.completed_at = new Date().toISOString();
+    const { error } = await supabase.from('kcb_payments').update(update).eq('id', payment.id).neq('status', 'PROVIDER_CONFIRMED_SUCCESS').neq('status', 'SANDBOX_SIMULATED_SUCCESS').neq('status', 'success');
     if (error) console.error('[kcb-ipn] update failed', { code: error.code, correlation: checkout || merchant });
     return ack();
   } catch (error) {

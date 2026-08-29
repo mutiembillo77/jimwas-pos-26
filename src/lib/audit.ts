@@ -6,6 +6,11 @@ import type { AuditLog, AuditEventType, RoleCode } from './security-types';
 
 // Audit event types for type safety
 export const AUDIT_EVENTS = {
+  // Payments
+  PAYMENT_INITIATED: 'PAYMENT_INITIATED',
+  PAYMENT_PROVIDER_CONFIRMED: 'PAYMENT_PROVIDER_CONFIRMED',
+  PAYMENT_SANDBOX_SIMULATED: 'PAYMENT_SANDBOX_SIMULATED',
+  PAYMENT_FAILED: 'PAYMENT_FAILED',
   // Sales
   SALE_CREATED: 'SALE_CREATED',
   SALE_COMPLETED: 'SALE_COMPLETED',
@@ -425,5 +430,78 @@ export async function logApprovalRejected(requestId: string, reason: string, app
     entityId: requestId,
     reason,
     userId: approverUserId,
+  });
+}
+
+// Log payment events
+export async function logPaymentProviderConfirmed(
+  paymentId: string,
+  details: {
+    checkoutRequestId?: string;
+    mpesaReceiptNumber?: string;
+    amount?: number;
+    phone?: string;
+    environment?: string;
+    provider?: string;
+  },
+  userId?: string
+): Promise<void> {
+  await logAuditEvent({
+    eventType: 'PAYMENT_PROVIDER_CONFIRMED',
+    entityType: 'payment',
+    entityId: paymentId,
+    newValue: {
+      ...details,
+      source: 'VERIFIED_KCB_CALLBACK',
+      status: 'PROVIDER_CONFIRMED_SUCCESS',
+    },
+    userId,
+  });
+}
+
+export async function logPaymentSandboxSimulated(
+  paymentId: string,
+  details: {
+    checkoutRequestId?: string;
+    receiptNumber?: string;
+    amount?: number;
+    phone?: string;
+  },
+  userId?: string
+): Promise<void> {
+  await logAuditEvent({
+    eventType: 'PAYMENT_SANDBOX_SIMULATED',
+    entityType: 'payment',
+    entityId: paymentId,
+    newValue: {
+      ...details,
+      source: 'AUTHORIZED_SANDBOX_SIMULATION',
+      status: 'SANDBOX_SIMULATED_SUCCESS',
+      environment: 'SANDBOX',
+    },
+    userId,
+  });
+}
+
+export async function logPaymentFailed(
+  paymentId: string,
+  details: {
+    checkoutRequestId?: string;
+    error: string;
+    amount?: number;
+    phone?: string;
+    environment?: string;
+  },
+  userId?: string
+): Promise<void> {
+  await logAuditEvent({
+    eventType: 'PAYMENT_FAILED',
+    entityType: 'payment',
+    entityId: paymentId,
+    newValue: {
+      ...details,
+      status: 'FAILED',
+    },
+    userId,
   });
 }

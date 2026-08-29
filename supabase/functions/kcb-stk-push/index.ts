@@ -265,29 +265,10 @@ Deno.serve(async (req: Request) => {
         (code && !["0", "00000000"].includes(code)) ||
         typeof checkout !== "string"
       ) {
-        if (environment === "SANDBOX") {
-          const syntheticCheckout = `ws_CO_SB_${Date.now()}`;
-          const syntheticMerchant = `MRQ_SB_${Date.now()}`;
-          await supabaseAdmin
-            .from("kcb_payments")
-            .update({
-              checkout_request_id: syntheticCheckout,
-              merchant_request_id: syntheticMerchant,
-              status: "processing",
-              raw_response: { sandbox_fallback: true, original_response: data },
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", payment.id);
-
-          return json({
-            success: true,
-            checkoutRequestId: syntheticCheckout,
-            merchantRequestId: syntheticMerchant,
-            responseCode: "00000000",
-            status: "processing",
-            correlationId,
-          });
-        }
+        const safeErrorMessage =
+          environment === "SANDBOX"
+            ? "KCB Sandbox did not accept this payment request. No STK prompt was dispatched."
+            : "KCB did not accept the STK request";
 
         await supabaseAdmin
           .from("kcb_payments")
@@ -295,16 +276,16 @@ Deno.serve(async (req: Request) => {
             status: "failed",
             result_code: code,
             result_desc: String(
-              data.ResponseDescription || data.message || "KCB rejected the request"
+              data.ResponseDescription || data.message || safeErrorMessage
             ).slice(0, 500),
-            error_message: "Provider rejected STK request",
+            error_message: safeErrorMessage,
             raw_response: data,
             updated_at: new Date().toISOString(),
           })
           .eq("id", payment.id);
 
         return json(
-          { error: "KCB did not accept the STK request", correlationId },
+          { error: safeErrorMessage, correlationId },
           response.ok ? 400 : 502
         );
       }
@@ -329,44 +310,25 @@ Deno.serve(async (req: Request) => {
         correlationId,
       });
     } catch (pushError) {
-      if (environment === "SANDBOX") {
-        const syntheticCheckout = `ws_CO_SB_${Date.now()}`;
-        const syntheticMerchant = `MRQ_SB_${Date.now()}`;
-        await supabaseAdmin
-          .from("kcb_payments")
-          .update({
-            checkout_request_id: syntheticCheckout,
-            merchant_request_id: syntheticMerchant,
-            status: "processing",
-            raw_response: { sandbox_fallback: true, error: String(pushError) },
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", payment.id);
-
-        return json({
-          success: true,
-          checkoutRequestId: syntheticCheckout,
-          merchantRequestId: syntheticMerchant,
-          responseCode: "00000000",
-          status: "processing",
-          correlationId,
-        });
-      }
-
       const safeDesc = sanitizeErrorMessage(
         pushError instanceof Error ? pushError.message : "KCB request failed"
       );
+      const safeErrorMessage =
+        environment === "SANDBOX"
+          ? "KCB Sandbox did not accept this payment request. No STK prompt was dispatched."
+          : "KCB request failed";
+
       await supabaseAdmin
         .from("kcb_payments")
         .update({
           status: "failed",
-          error_message: "KCB request failed",
+          error_message: safeErrorMessage,
           result_desc: safeDesc,
           updated_at: new Date().toISOString(),
         })
         .eq("id", payment.id);
 
-      return json({ error: "KCB request failed", correlationId }, 502);
+      return json({ error: safeErrorMessage, correlationId }, 502);
     }
   } catch (err) {
     const safeMsg = sanitizeErrorMessage(

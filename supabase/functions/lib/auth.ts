@@ -142,6 +142,24 @@ export function normalizePhone(value: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Recognized Sandbox Test Numbers
+//
+// Official KCB BUNI test number: 254700000000 (or local format: 0720000000 / 0700000000)
+// Legacy Daraja test number: 254708374149
+// Real phone numbers (e.g. 0111810434 → 254111810434) are NEVER recognized as test numbers.
+// ---------------------------------------------------------------------------
+
+export const RECOGNIZED_SANDBOX_TEST_PHONES = new Set([
+  "254700000000",
+  "254720000000",
+  "254708374149",
+]);
+
+export function isSandboxTestNumber(normalizedPhone: string): boolean {
+  return RECOGNIZED_SANDBOX_TEST_PHONES.has(normalizedPhone);
+}
+
+// ---------------------------------------------------------------------------
 // Amount validation (per spec §5)
 //
 // Requirements:

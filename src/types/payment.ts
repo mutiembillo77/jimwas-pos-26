@@ -5,7 +5,14 @@
 
 export type PaymentMethod = 'kcb_buni' | 'ncba' | 'cash';
 export type PaymentTiming = 'immediate' | 'cod';
-export type PaymentStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'CANCELLED';
+export type PaymentStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'PROVIDER_CONFIRMED_SUCCESS'
+  | 'SANDBOX_SIMULATED_SUCCESS'
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'CANCELLED';
 export type ProviderStatus = 'ACTIVE' | 'PENDING' | 'INACTIVE';
 
 export interface PaymentConfig {

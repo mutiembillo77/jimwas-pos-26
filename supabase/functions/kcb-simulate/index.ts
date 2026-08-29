@@ -162,7 +162,7 @@ Deno.serve(async (req: Request) => {
         await supabaseAdmin
           .from("kcb_payments")
           .update({
-            status: "paid",
+            status: "SANDBOX_SIMULATED_SUCCESS",
             receipt: `SIMR${Date.now()}`,
             callback_received: true,
             updated_at: now,

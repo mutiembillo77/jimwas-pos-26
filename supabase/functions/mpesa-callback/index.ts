@@ -60,7 +60,7 @@ Deno.serve(async (req: Request) => {
     }
 
     let status: string;
-    if (resultCode === 0 || resultCode === '0') status = 'success';
+    if (resultCode === 0 || resultCode === '0') status = 'PROVIDER_CONFIRMED_SUCCESS';
     else if (resultCode === 1032) status = 'cancelled';
     else if (resultCode === 1001) status = 'timeout';
     else if (resultCode === 1 || resultCode === '1') status = 'insufficient_balance';
@@ -90,7 +90,7 @@ Deno.serve(async (req: Request) => {
       }
 
       // Terminal state guard — already settled
-      if (kcbPayment.status === 'success') {
+      if (kcbPayment.status === 'PROVIDER_CONFIRMED_SUCCESS' || kcbPayment.status === 'SANDBOX_SIMULATED_SUCCESS' || kcbPayment.status === 'success') {
         return new Response(JSON.stringify({ ResultCode: 0, ResultDesc: "Success" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
@@ -103,12 +103,12 @@ Deno.serve(async (req: Request) => {
         callback_received: true,
         callback_payload: body,
         updated_at: new Date().toISOString(),
-      }).eq('id', kcbPayment.id).neq('status', 'success');
+      }).eq('id', kcbPayment.id).neq('status', 'PROVIDER_CONFIRMED_SUCCESS').neq('status', 'SANDBOX_SIMULATED_SUCCESS').neq('status', 'success');
 
       console.log("kcb_payments updated:", kcbPayment.id, "status:", status);
 
       // If successful and linked to a transaction, update it
-      if (status === 'success' && kcbPayment.transaction_id) {
+      if ((status === 'PROVIDER_CONFIRMED_SUCCESS' || status === 'success') && kcbPayment.transaction_id) {
         await supabase.from('transactions').update({
           status: 'completed',
           payment_reference: mpesaReceiptNumber,
@@ -129,7 +129,7 @@ Deno.serve(async (req: Request) => {
       const mpesaTxEnv: FinancialEnvironment = (mpesaTx.environment as FinancialEnvironment) || 'SANDBOX';
       if (providerEnvironment !== mpesaTxEnv) {
         console.error(`[mpesa-callback] ENVIRONMENT MISMATCH on mpesa_transactions: provider=${providerEnvironment}, tx=${mpesaTxEnv}`);
-      } else if (status === 'success' && mpesaTx.transaction_id) {
+      } else if ((status === 'PROVIDER_CONFIRMED_SUCCESS' || status === 'success') && mpesaTx.transaction_id) {
         await supabase.from('mpesa_transactions').update({
           status,
           result_code: String(resultCode ?? ''),

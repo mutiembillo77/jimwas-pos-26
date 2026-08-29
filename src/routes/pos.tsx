@@ -340,10 +340,18 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
         },
       });
 
-      if (statusResult.status === 'success') {
+      if (
+        statusResult.status === 'PROVIDER_CONFIRMED_SUCCESS' ||
+        statusResult.status === 'SANDBOX_SIMULATED_SUCCESS' ||
+        statusResult.status === 'success'
+      ) {
         setKCBStatus('success');
         setKCBReceiptNumber(statusResult.mpesaReceiptNumber || null);
-        toast.show('KCB payment successful!');
+        if (statusResult.status === 'SANDBOX_SIMULATED_SUCCESS') {
+          toast.show('Sandbox simulated payment successful (Testing Mode).');
+        } else {
+          toast.show('KCB payment confirmed successfully!');
+        }
         // Auto-complete the sale
         await completeKCBSTKSale(statusResult.mpesaReceiptNumber);
       } else if (statusResult.status === 'cancelled') {

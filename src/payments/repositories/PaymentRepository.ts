@@ -45,8 +45,9 @@ export class PaymentRepository {
     const existing = await this.findByMerchantRequestId(merchantRequestId);
     if (!existing) return null;
     // Terminal-state guard: do not regress a completed or cancelled payment.
-    // A delayed / duplicate callback must not overwrite a SUCCESS or CANCELLED record.
-    if (['SUCCESS', 'CANCELLED'].includes(existing.status)) return existing;
+    // A delayed / duplicate callback must not overwrite a PROVIDER_CONFIRMED_SUCCESS,
+    // SANDBOX_SIMULATED_SUCCESS, legacy SUCCESS, or CANCELLED record.
+    if (['PROVIDER_CONFIRMED_SUCCESS', 'SANDBOX_SIMULATED_SUCCESS', 'SUCCESS', 'CANCELLED'].includes(existing.status)) return existing;
     return this.prisma.payment.update({ where: { id: existing.id }, data: updates });
   }
 

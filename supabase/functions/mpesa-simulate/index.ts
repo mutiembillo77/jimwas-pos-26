@@ -92,9 +92,9 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await supabaseAdmin
         .from("mpesa_transactions")
         .update({
-          status: "success",
+          status: "SANDBOX_SIMULATED_SUCCESS",
           result_code: "0",
-          result_desc: "The service request is processed successfully.",
+          result_desc: "The service request is processed successfully. (Sandbox Simulation)",
           mpesa_receipt_number: receiptNumber,
           transaction_date: formattedDate,
           callback_received: true,
@@ -120,9 +120,9 @@ Deno.serve(async (req: Request) => {
           merchant_request_id: "sim-" + Date.now(),
           phone_number: String(phone || "254708374149"),
           amount: Math.round(Number(amount)) || 1,
-          status: "success",
+          status: "SANDBOX_SIMULATED_SUCCESS",
           result_code: "0",
-          result_desc: "The service request is processed successfully.",
+          result_desc: "The service request is processed successfully. (Sandbox Simulation)",
           mpesa_receipt_number: receiptNumber,
           transaction_date: formattedDate,
           callback_received: true,

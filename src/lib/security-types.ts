@@ -166,6 +166,11 @@ export interface UserSession {
 // ============ AUDIT TRAIL ============
 
 export type AuditEventType =
+  // Payment events
+  | 'PAYMENT_INITIATED'
+  | 'PAYMENT_PROVIDER_CONFIRMED'
+  | 'PAYMENT_SANDBOX_SIMULATED'
+  | 'PAYMENT_FAILED'
   // Sales events
   | 'SALE_CREATED'
   | 'SALE_COMPLETED'

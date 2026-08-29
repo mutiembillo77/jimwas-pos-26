@@ -55,7 +55,16 @@ export interface STKPushResponse {
 
 export interface STKPushStatusResponse {
   success: boolean;
-  status: 'pending' | 'processing' | 'success' | 'failed' | 'cancelled' | 'timeout' | 'insufficient_balance';
+  status:
+    | 'pending'
+    | 'processing'
+    | 'PROVIDER_CONFIRMED_SUCCESS'
+    | 'SANDBOX_SIMULATED_SUCCESS'
+    | 'success'
+    | 'failed'
+    | 'cancelled'
+    | 'timeout'
+    | 'insufficient_balance';
   mpesaReceiptNumber?: string;
   resultDesc?: string;
   error?: string;
@@ -230,7 +239,11 @@ export async function pollForKCBPaymentCompletion(
 
     options?.onStatusChange?.(status);
 
-    if (status.status === 'success') {
+    if (
+      status.status === 'PROVIDER_CONFIRMED_SUCCESS' ||
+      status.status === 'SANDBOX_SIMULATED_SUCCESS' ||
+      status.status === 'success'
+    ) {
       return status;
     }
 
