@@ -79,9 +79,10 @@ export function EnterpriseOperationsPage({ section = 'reports', openTransactionI
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  const reconciliationSummary = useMemo(() => reconciliations.reduce<Record<string, number>>((summary, row) => { summary[row.status] = (summary[row.status] || 0) + 1; return summary; }, {}), [reconciliations]);
+
   if ((active as string) === 'reports') return <ReportsWorkspace />;
 
-  const reconciliationSummary = useMemo(() => reconciliations.reduce<Record<string, number>>((summary, row) => { summary[row.status] = (summary[row.status] || 0) + 1; return summary; }, {}), [reconciliations]);
   const openShiftRecord = shifts.find((shift) => shift.status === 'open');
   const tabs = [
     { id: 'reports' as const, label: 'Reports', icon: BarChart3 },

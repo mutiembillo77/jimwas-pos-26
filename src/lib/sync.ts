@@ -25,7 +25,7 @@ export interface SyncState {
   error: string | null;
 }
 
-let syncState: SyncState = {
+const syncState: SyncState = {
   status: 'synced', pendingCount: 0, failedCount: 0, conflictCount: 0,
   lastSync: null, lastPush: null, lastPull: null, deviceId: null, error: null,
 };
@@ -133,7 +133,7 @@ export async function retryAllSyncItems(): Promise<{ success: number; failed: nu
   let failed = 0;
   for (const item of items) {
     const result = await retrySyncItem(item.id);
-    result.success ? success++ : failed++;
+    if (result.success) { success++; } else { failed++; }
   }
   await checkPendingCount();
   return { success, failed };

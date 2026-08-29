@@ -78,7 +78,7 @@ async function getAuthHeader(): Promise<string> {
       const token = data?.session?.access_token;
       if (token) return `Bearer ${token}`;
     }
-  } catch {}
+  } catch { /* session unavailable — fall back to anon key */ }
   return `Bearer ${SUPABASE_ANON_KEY}`;
 }
 

@@ -500,7 +500,7 @@ export async function createManualEntry(
 
 // Get default expense categories
 export async function getExpenseCategories(): Promise<ExpenseCategoryRecord[]> {
-  let categories = await getAllExpenseCategories();
+  const categories = await getAllExpenseCategories();
 
   if (categories.length === 0) {
     const defaults = [
