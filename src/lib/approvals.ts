@@ -301,9 +301,9 @@ export async function voidTransactionDirect(transactionId: string, reason: strin
   if (!reason.trim()) return { success: false, error: 'A reason is required' };
   const products = await getAllProducts();
   const productMap = new Map(products.map(product => [product.id, product]));
-  for (const item of transaction.items) {
+  for (const item of (transaction.items || [])) {
     const product = productMap.get(item.product_id);
-    if (product) await saveProduct({ ...product, stock: product.stock + item.quantity, updated_at: new Date().toISOString(), sync_status: 'pending' });
+    if (product) await saveProduct({ ...product, stock: product.stock + (item.quantity || 0), updated_at: new Date().toISOString(), sync_status: 'pending' });
   }
   await saveTransaction({ ...transaction, status: 'voided', notes: `Voided: ${reason}`, sync_status: 'pending' });
   await logSaleVoided(transactionId, reason, userId, transaction);
@@ -323,12 +323,12 @@ async function executeVoid(request: ApprovalRequest, _data?: Record<string, unkn
   const productMap = new Map(products.map(p => [p.id, p]));
 
   // Restore stock for each item
-  for (const item of transaction.items) {
+  for (const item of (transaction.items || [])) {
     const product = productMap.get(item.product_id);
     if (product) {
       const updatedProduct = {
         ...product,
-        stock: product.stock + item.quantity,
+        stock: product.stock + (item.quantity || 0),
         updated_at: new Date().toISOString(),
         sync_status: 'pending' as const,
       };
