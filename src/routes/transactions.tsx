@@ -1,7 +1,7 @@
 // Unified Transactions Dashboard - Real-time transaction tracking across all channels
 // Consolidates: POS transactions, KCB BUNI payments, ledger entries into single view
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search, Printer, Trash2, RefreshCw, TrendingUp, TrendingDown,
   AlertCircle, Smartphone, DollarSign, Banknote
@@ -52,6 +52,9 @@ export function TransactionsPage() {
   const [showVoidModal, setShowVoidModal] = useState(false);
   const [canVoid, setCanVoid] = useState(false);
 
+  // Cache raw POS Transaction objects by ID so void lookup doesn't depend on IndexedDB
+  const posTransactionCacheRef = useRef<Map<string, Transaction>>(new Map());
+
   // Statistics
   const [stats, setStats] = useState({
     totalTransactions: 0,
@@ -68,6 +71,11 @@ export function TransactionsPage() {
         getAllTransactions(),
         getAllKCBPayments(),
       ]);
+
+      // Cache full Transaction objects keyed by ID for void lookup
+      const newCache = new Map<string, Transaction>();
+      for (const txn of posTransactions) newCache.set(txn.id, txn);
+      posTransactionCacheRef.current = newCache;
 
       // Convert POS transactions to unified format
       const posTxns: UnifiedTransaction[] = posTransactions.map(txn => ({
@@ -259,8 +267,15 @@ export function TransactionsPage() {
     if (!canVoid || (transaction.status !== 'completed' && transaction.status !== 'success') || transaction.type !== 'sale') return;
     
     try {
-      // Fetch the full transaction details
-      const fullTransaction = await getTransaction(transaction.id);
+      // First check the in-memory cache (populated during loadTransactions) to avoid
+      // depending on IndexedDB which may be empty on a fresh Vercel session.
+      let fullTransaction: Transaction | undefined = posTransactionCacheRef.current.get(transaction.id);
+
+      // Fall back to IndexedDB if not in cache
+      if (!fullTransaction) {
+        fullTransaction = await getTransaction(transaction.id);
+      }
+
       if (fullTransaction) {
         setSelectedTransaction(fullTransaction);
         setShowVoidModal(true);

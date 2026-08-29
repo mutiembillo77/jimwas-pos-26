@@ -295,7 +295,31 @@ async function executeApprovedAction(request: ApprovalRequest): Promise<void> {
 
 // Execute a void immediately for an authorized Admin/Administrator.
 export async function voidTransactionDirect(transactionId: string, reason: string, userId: string): Promise<{ success: boolean; error?: string }> {
-  const transaction = await getTransaction(transactionId);
+  let transaction = await getTransaction(transactionId);
+
+  // Supabase fallback: if not in IndexedDB (e.g. fresh Vercel session), fetch from cloud
+  if (!transaction) {
+    try {
+      const { supabase } = await import('./supabaseClient');
+      if (supabase) {
+        const { data } = await supabase
+          .from('transactions')
+          .select('*, transaction_items(*)')
+          .eq('id', transactionId)
+          .single();
+        if (data) {
+          // Normalise items from join
+          const items = Array.isArray(data.transaction_items) ? data.transaction_items : [];
+          transaction = { ...data, items } as Awaited<ReturnType<typeof getTransaction>>;
+          // Cache locally so subsequent operations (saveTransaction) can read it
+          if (transaction) await saveTransaction(transaction);
+        }
+      }
+    } catch {
+      // Supabase fallback failed — will be caught below
+    }
+  }
+
   if (!transaction) return { success: false, error: 'Transaction not found' };
   if (transaction.status === 'voided') return { success: false, error: 'Transaction is already voided' };
   if (!reason.trim()) return { success: false, error: 'A reason is required' };
@@ -309,6 +333,7 @@ export async function voidTransactionDirect(transactionId: string, reason: strin
   await logSaleVoided(transactionId, reason, userId, transaction);
   return { success: true };
 }
+
 
 // Execute void
 async function executeVoid(request: ApprovalRequest, _data?: Record<string, unknown>): Promise<void> {
