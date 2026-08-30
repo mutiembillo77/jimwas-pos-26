@@ -1,8 +1,40 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      injectRegister: 'auto',
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,json,woff,woff2}'],
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api\//, /^\/functions\//, /^\/rest\//, /^\/auth\//],
+      },
+      includeAssets: ['icon.svg', 'placeholder.svg', 'placeholder-logo.svg'],
+      manifest: {
+        name: 'Jimwas POS',
+        short_name: 'Jimwas POS',
+        description: 'Jimwas Enterprises Point of Sale System',
+        theme_color: '#0f172a',
+        background_color: '#0f172a',
+        display: 'standalone',
+        orientation: 'any',
+        scope: '/',
+        start_url: '/',
+        icons: [
+          {
+            src: '/icon.svg',
+            sizes: '192x192 512x512',
+            type: 'image/svg+xml',
+            purpose: 'any maskable',
+          },
+        ],
+      },
+    }),
+  ],
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
@@ -33,6 +65,5 @@ export default defineConfig({
       '.vusercontent.net',
     ],
   },
-  // Vite automatically exposes all VITE_* variables through import.meta.env.
-  // No manual define block is needed — adding one can override and mask correct values.
 });
+
