@@ -98,8 +98,8 @@ export function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo and Title */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-600 mb-4 shadow-lg shadow-emerald-900/30">
-            <Lock size={32} className="text-white" />
+          <div className="inline-flex items-center justify-center mb-3">
+            <img src="/logo.svg" alt="Jimwas Enterprises" className="w-24 h-24 mx-auto object-contain drop-shadow-xl" />
           </div>
           <h1 className="text-3xl font-bold text-white tracking-tight">Jimwas POS</h1>
           <p className="text-slate-400 mt-2 text-sm">

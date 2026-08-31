@@ -13,7 +13,7 @@ export default defineConfig({
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//, /^\/functions\//, /^\/rest\//, /^\/auth\//],
       },
-      includeAssets: ['icon.svg', 'placeholder.svg', 'placeholder-logo.svg'],
+      includeAssets: ['favicon.ico', 'icon.svg', 'logo.svg', 'icon-192.png', 'icon-512.png', 'social_preview.png'],
       manifest: {
         name: 'Jimwas POS',
         short_name: 'Jimwas POS',
@@ -25,6 +25,18 @@ export default defineConfig({
         scope: '/',
         start_url: '/',
         icons: [
+          {
+            src: '/icon-192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: '/icon-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any',
+          },
           {
             src: '/icon.svg',
             sizes: '192x192 512x512',

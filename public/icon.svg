@@ -1,26 +1,67 @@
-<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <style>
-    @media (prefers-color-scheme: light) {
-      .background { fill: black; }
-      .foreground { fill: white; }
-    }
-    @media (prefers-color-scheme: dark) {
-      .background { fill: white; }
-      .foreground { fill: black; }
-    }
-  </style>
-  <g clip-path="url(#clip0_7960_43945)">
-    <rect class="background" width="180" height="180" rx="37" />
-    <g style="transform: scale(95%); transform-origin: center">
-      <path class="foreground"
-        d="M101.141 53H136.632C151.023 53 162.689 64.6662 162.689 79.0573V112.904H148.112V79.0573C148.112 78.7105 148.098 78.3662 148.072 78.0251L112.581 112.898C112.701 112.902 112.821 112.904 112.941 112.904H148.112V126.672H112.941C98.5504 126.672 86.5638 114.891 86.5638 100.5V66.7434H101.141V100.5C101.141 101.15 101.191 101.792 101.289 102.422L137.56 66.7816C137.255 66.7563 136.945 66.7434 136.632 66.7434H101.141V53Z" />
-      <path class="foreground"
-        d="M65.2926 124.136L14 66.7372H34.6355L64.7495 100.436V66.7372H80.1365V118.47C80.1365 126.278 70.4953 129.958 65.2926 124.136Z" />
-    </g>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
   <defs>
-    <clipPath id="clip0_7960_43945">
-      <rect width="180" height="180" fill="white" />
-    </clipPath>
+    <!-- Gold Linear Gradient -->
+    <linearGradient id="icon-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FCE6B2" />
+      <stop offset="40%" stop-color="#D4A359" />
+      <stop offset="100%" stop-color="#B88238" />
+    </linearGradient>
+
+    <!-- Cyan Linear Gradient -->
+    <linearGradient id="icon-cyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#26D2E0" />
+      <stop offset="100%" stop-color="#008A96" />
+    </linearGradient>
+
+    <!-- Background Radial Gradient -->
+    <radialGradient id="icon-bg" cx="50%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#241B15" />
+      <stop offset="85%" stop-color="#140E0B" />
+      <stop offset="100%" stop-color="#0E0907" />
+    </radialGradient>
   </defs>
+
+  <!-- 1. Background Circular Base -->
+  <circle cx="256" cy="256" r="248" fill="url(#icon-bg)" stroke="#2E211A" stroke-width="4" />
+
+  <!-- 2. Concentric Gold Outer Arc Accents -->
+  <path d="M 180,45 C 310,35 440,110 475,230 C 480,245 470,230 430,140 C 370,80 260,50 180,45 Z" fill="url(#icon-gold)" />
+  <path d="M 45,260 C 40,360 110,445 220,475 C 130,440 70,360 45,260 Z" fill="url(#icon-gold)" />
+
+  <!-- 3. Central Brand Composition (Bold & Legible at 16x16 / 32x32) -->
+  <g transform="translate(18, 0)">
+    <!-- Top Microwave/Monitor Accent (Gold) -->
+    <rect x="220" y="105" width="105" height="70" rx="10" fill="url(#icon-gold)" />
+    <rect x="232" y="116" width="62" height="48" rx="4" fill="#140E0B" />
+    <!-- Pedestal Base -->
+    <rect x="205" y="180" width="135" height="14" rx="7" fill="url(#icon-gold)" />
+
+    <!-- Left Floor Lamp Accent (Gold) -->
+    <polygon points="120,185 170,185 195,255 95,255" fill="url(#icon-gold)" />
+    <path d="M 145,255 L 145,360 L 225,360 L 225,374 L 132,374 L 132,255 Z" fill="url(#icon-gold)" />
+
+    <!-- Center Refrigerator (Cyan & Gold) -->
+    <rect x="260" y="200" width="75" height="40" rx="7" fill="url(#icon-gold)" />
+    <rect x="260" y="242" width="75" height="85" rx="6" fill="url(#icon-cyan)" />
+
+    <!-- Front-Load Washer (Cyan & White Glass) -->
+    <rect x="215" y="255" width="65" height="68" rx="7" fill="url(#icon-cyan)" />
+    <circle cx="248" cy="296" r="22" fill="#140E0B" stroke="#FFFFFF" stroke-width="4.5" />
+
+    <!-- Sweeping Dynamic Orbital Ring (Gold) -->
+    <path d="M 195,305 C 190,245 285,225 335,265 C 380,300 360,345 295,355 C 235,362 200,345 195,305 Z" fill="none" stroke="url(#icon-gold)" stroke-width="15" stroke-linecap="round" />
+
+    <!-- Circuit Trace Accents -->
+    <path d="M 355,265 L 415,235" fill="none" stroke="url(#icon-gold)" stroke-width="5" stroke-linecap="round" />
+    <circle cx="420" cy="232" r="6" fill="url(#icon-gold)" />
+
+    <path d="M 365,290 L 430,270" fill="none" stroke="url(#icon-gold)" stroke-width="5" stroke-linecap="round" />
+    <circle cx="435" cy="268" r="6" fill="url(#icon-gold)" />
+
+    <path d="M 360,315 L 435,305" fill="none" stroke="url(#icon-gold)" stroke-width="5" stroke-linecap="round" />
+    <circle cx="440" cy="303" r="6" fill="url(#icon-gold)" />
+
+    <path d="M 345,340 L 410,340" fill="none" stroke="url(#icon-gold)" stroke-width="5" stroke-linecap="round" />
+    <circle cx="415" cy="340" r="6" fill="url(#icon-gold)" />
+  </g>
 </svg>

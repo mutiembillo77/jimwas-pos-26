@@ -105,8 +105,8 @@ export function Layout({ children, currentPage, onNavigate, user }: LayoutProps)
           {/* Logo */}
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center">
-                <ShoppingCart size={18} className="text-white" />
+              <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center bg-slate-900 border border-slate-700/60 shadow-sm">
+                <img src="/icon.svg" alt="Jimwas POS" className="w-8 h-8 object-contain" />
               </div>
               <div className="hidden sm:block">
                 <h1 className="text-lg font-bold text-emerald-400 leading-tight">Jimwas POS</h1>
