@@ -86,8 +86,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const freshUser = await getCurrentUser();
           console.log('[AUTH DEBUG] Fresh user from getCurrentUser:', freshUser ? `${freshUser.username} (${freshUser.role_code})` : 'null');
           if (isMounted) {
-            setUser(freshUser);
-            clearAllPermissionCache();
+            if (freshUser !== null) {
+              // Valid user returned (online-authenticated or offline-authorized) — update state.
+              setUser(freshUser);
+              clearAllPermissionCache();
+            } else {
+              // freshUser is null: this may be a network-only failure during the remote
+              // POS profile lookup while a valid OfflineAuthSnapshot is already active.
+              // Supabase can fire SIGNED_IN from a locally-cached localStorage session
+              // even when the device has no Internet connectivity. Use a functional update
+              // to avoid overwriting any offline-authorized user already set by init().
+              setUser((prev) => {
+                if (prev !== null) {
+                  // Preserve offline-authorized state. The auth event was triggered by a
+                  // cached session; the remote profile lookup failed, not the authorization.
+                  console.log('[AUTH DEBUG] Preserving offline-authorized user; remote profile lookup returned null.');
+                  return prev;
+                }
+                return null;
+              });
+            }
           }
         }
       });

@@ -474,6 +474,7 @@ export async function getAuthState(): Promise<{
       let posUser = await getUserByAuthUserId(authUser.id);
 
       if (!posUser) {
+        let remoteProfileNetworkFailure: unknown = null;
         try {
           const { data: remoteUser } = await supabase
             .from('users')
@@ -484,18 +485,29 @@ export async function getAuthState(): Promise<{
             posUser = remoteUser as User;
             await saveUser(posUser);
           }
-        } catch {
-          // Table query error or profile not found
+        } catch (profileErr) {
+          // Distinguish network/transport failures from genuine "profile not found".
+          // Network failures must NOT clear the OfflineAuthSnapshot; re-throw so the
+          // outer catch falls through to offline snapshot validation.
+          if (isNetworkOrTransportError(profileErr)) {
+            remoteProfileNetworkFailure = profileErr;
+          }
+          // Non-network errors are treated as "profile not found".
         }
-      }
 
-      if (!posUser) {
-        await clearOfflineAuthSnapshot();
-        return {
-          state: 'auth-required',
-          user: null,
-          error: 'No associated POS employee profile found for this account.',
-        };
+        if (!posUser) {
+          if (remoteProfileNetworkFailure) {
+            // Re-throw the network error so the outer catch (line ~520) classifies it
+            // as a transport failure and falls through to validateOfflineAuthSnapshot().
+            throw remoteProfileNetworkFailure;
+          }
+          await clearOfflineAuthSnapshot();
+          return {
+            state: 'auth-required',
+            user: null,
+            error: 'No associated POS employee profile found for this account.',
+          };
+        }
       }
 
       if (!posUser.is_active) {
