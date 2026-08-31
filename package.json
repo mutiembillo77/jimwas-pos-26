@@ -32,7 +32,7 @@
   "devDependencies": {
     "@eslint/js": "^9.9.1",
     "@testing-library/jest-dom": "^6.0.0",
-    "@testing-library/react": "^14.0.0",
+    "@testing-library/react": "^16.3.3",
     "@types/express": "^5.0.6",
     "@types/qs": "^6.15.1",
     "@types/react": "^18.3.5",
