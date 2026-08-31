@@ -3,7 +3,7 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Jimwas POS',
+  title: 'Jimwas Enterprises POS',
   description: 'Jimwas Enterprises Point of Sale System',
   icons: {
     icon: [
