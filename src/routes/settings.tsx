@@ -1347,8 +1347,26 @@ function UserModal({
           return;
         }
 
-        if (formData.password.length < 6) {
-          setError('Password must be at least 6 characters');
+        if (formData.password.length < 8) {
+          setError('Password must be at least 8 characters.');
+          setSaving(false);
+          return;
+        }
+
+        if (!/[A-Z]/.test(formData.password)) {
+          setError('Password must contain at least one uppercase letter.');
+          setSaving(false);
+          return;
+        }
+
+        if (!/[a-z]/.test(formData.password)) {
+          setError('Password must contain at least one lowercase letter.');
+          setSaving(false);
+          return;
+        }
+
+        if (!/\d/.test(formData.password)) {
+          setError('Password must contain at least one number.');
           setSaving(false);
           return;
         }
@@ -1508,7 +1526,7 @@ function UserModal({
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className="w-full px-4 py-3 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-emerald-500 focus:outline-none"
                   required
-                  minLength={6}
+                  minLength={8}
                 />
               </div>
 
