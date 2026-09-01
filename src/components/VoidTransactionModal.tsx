@@ -94,7 +94,7 @@ export function VoidTransactionModal({ transaction, isOpen, onClose, onVoidCompl
     setIsLoading(true);
     try {
       // Use auth context role directly — avoids IndexedDB lookup failures on fresh sessions
-      const isAdmin = user.role_code === 'admin' || user.role_code === 'administrator';
+      const isAdmin = user.role_code === 'admin';
 
       if (isAdmin) {
         const result = await voidTransactionDirect(transaction.id, reason.trim(), user.id);
@@ -198,7 +198,7 @@ export function VoidTransactionModal({ transaction, isOpen, onClose, onVoidCompl
               <li>Reverse the transaction in the system</li>
               <li>Restore inventory levels</li>
               <li>Refund customer loyalty points if applicable</li>
-              <li>{user.role_code === 'admin' || user.role_code === 'administrator' ? 'Be completed immediately by an authorized admin' : 'Require manager/admin approval'}</li>
+              <li>{user.role_code === 'admin' ? 'Be completed immediately by an authorized admin' : 'Require manager/admin approval'}</li>
               <li>Be logged in the audit trail</li>
             </ul>
           </div>
@@ -236,7 +236,7 @@ export function VoidTransactionModal({ transaction, isOpen, onClose, onVoidCompl
             disabled={isLoading || !reason.trim()}
           >
             {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-            {user.role_code === 'admin' || user.role_code === 'administrator' ? 'Void Transaction' : 'Submit Void Request'}
+            {user.role_code === 'admin' ? 'Void Transaction' : 'Submit Void Request'}
           </button>
         </div>
       </div>

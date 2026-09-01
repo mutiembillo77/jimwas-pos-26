@@ -52,7 +52,6 @@ async function initializeSecurityDataOnce(): Promise<void> {
   const now = new Date().toISOString();
   const roleData: Array<{ code: RoleCode; name: string; description: string }> = [
     { code: 'admin', name: 'System Administrator', description: 'Full system access with all permissions' },
-    { code: 'administrator', name: 'Admin', description: 'Direct high-risk transaction controls with full operational permissions' },
     { code: 'manager', name: 'Manager', description: 'Store manager with sales, inventory, and approval permissions' },
     { code: 'cashier', name: 'Cashier', description: 'Cashier with basic sales and customer permissions' },
   ];

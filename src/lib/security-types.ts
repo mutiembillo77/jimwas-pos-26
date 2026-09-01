@@ -79,7 +79,7 @@ export const PERMISSIONS: Permission[] = [
 
 // ============ ROLES ============
 
-export type RoleCode = 'admin' | 'administrator' | 'manager' | 'cashier';
+export type RoleCode = 'admin' | 'manager' | 'cashier';
 
 export interface Role {
   id: string;
@@ -96,7 +96,6 @@ export interface Role {
 // Default role permission assignments
 export const DEFAULT_ROLE_PERMISSIONS: Record<RoleCode, string[]> = {
   admin: PERMISSIONS.map(p => p.id), // Full access
-  administrator: PERMISSIONS.map(p => p.id), // Full access without approval for high-risk actions
   manager: [
     // Sales - full access
     'perm-sales-view', 'perm-sales-create', 'perm-sales-edit', 'perm-sales-void', 'perm-sales-refund',

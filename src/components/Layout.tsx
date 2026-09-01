@@ -42,7 +42,7 @@ export function Layout({ children, currentPage, onNavigate, user }: LayoutProps)
   ];
 
   // Admin/Manager navigation items (in "More" dropdown)
-  const adminNavItems = user && (user.role_code === 'admin' || user.role_code === 'administrator' || user.role_code === 'manager' || user.role_code === 'cashier') ? [
+  const adminNavItems = user && (user.role_code === 'admin' || user.role_code === 'manager' || user.role_code === 'cashier') ? [
     { id: 'transactions', label: 'Transactions', icon: DollarSign },
     { id: 'security', label: 'Security', icon: Shield },
     { id: 'audit', label: 'Audit Trail', icon: FileText },
@@ -53,13 +53,13 @@ export function Layout({ children, currentPage, onNavigate, user }: LayoutProps)
   ] : [];
 
   // Manager/Admin approval items
-  const approvalItems = user && (user.role_code === 'admin' || user.role_code === 'administrator' || user.role_code === 'manager') ? [
+  const approvalItems = user && (user.role_code === 'admin' || user.role_code === 'manager') ? [
     { id: 'void-requests', label: 'Void Approvals', icon: AlertCircle },
     { id: 'offers', label: 'Offers', icon: Tag },
   ] : [];
 
   // Admin only navigation items
-  const adminOnlyItems = user && (user.role_code === 'admin' || user.role_code === 'administrator') ? [
+  const adminOnlyItems = user && user.role_code === 'admin' ? [
     { id: 'populate-db', label: 'Populate DB', icon: Database },
     { id: 'backup', label: 'Backup', icon: Archive },
     { id: 'settings', label: 'Settings', icon: Settings },
@@ -86,8 +86,7 @@ export function Layout({ children, currentPage, onNavigate, user }: LayoutProps)
 
   const getRoleLabel = (roleCode: string) => {
     switch (roleCode) {
-      case 'admin': return 'System Administrator';
-      case 'administrator': return 'Admin';
+      case 'admin': return 'Admin';
       case 'manager': return 'Manager';
       case 'cashier': return 'Cashier';
       default: return roleCode;
@@ -258,7 +257,6 @@ export function Layout({ children, currentPage, onNavigate, user }: LayoutProps)
                         <p className="text-xs text-slate-400 truncate">{user.email}</p>
                         <span className={`inline-block mt-1 text-xs px-2 py-0.5 rounded ${
                           user.role_code === 'admin' ? 'bg-red-900/30 text-red-400' :
-                          user.role_code === 'administrator' ? 'bg-purple-900/30 text-purple-400' :
                           user.role_code === 'manager' ? 'bg-amber-900/30 text-amber-400' :
                           'bg-blue-900/30 text-blue-400'
                         }`}>
