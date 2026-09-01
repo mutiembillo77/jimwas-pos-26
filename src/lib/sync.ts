@@ -480,6 +480,34 @@ let backgroundHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 async function handleRealtimeChange(payload: { table: string; eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }) {
   try {
     const { table, eventType } = payload;
+
+    // Handle transaction_items changes by updating the parent transaction in IndexedDB
+    if (table === 'transaction_items') {
+      const txId = (payload.new?.transaction_id || payload.old?.transaction_id) as string | undefined;
+      if (txId) {
+        const client = getSupabase();
+        if (client) {
+          const { data, error } = await client
+            .from('transactions')
+            .select('*, transaction_items(*)')
+            .eq('id', txId)
+            .maybeSingle();
+          if (!error && data) {
+            const db = await getDB();
+            const row = (data as unknown) as Record<string, unknown>;
+            const fullRecord = {
+              ...row,
+              sync_status: 'synced',
+              items: (row['transaction_items'] as unknown[]) || [],
+            };
+            await db.put('transactions', fullRecord as never);
+            notifyDataUpdated('transactions', eventType, fullRecord);
+            return;
+          }
+        }
+      }
+    }
+
     const config = TABLE_CONFIGS.find(c => c.table === table);
     if (!config) return;
 
@@ -493,6 +521,38 @@ async function handleRealtimeChange(payload: { table: string; eventType: string;
     } else if (eventType === 'INSERT' || eventType === 'UPDATE') {
       const record = payload.new;
       if (record && record.id) {
+        if (config.relation) {
+          const client = getSupabase();
+          if (client) {
+            const { data, error } = await client
+              .from(table)
+              .select(`*, ${config.relation.table}(*)`)
+              .eq('id', record.id)
+              .maybeSingle();
+            if (!error && data) {
+              const row = (data as unknown) as Record<string, unknown>;
+              const fullRecord = {
+                ...row,
+                sync_status: 'synced',
+                items: (row[config.relation.field] as unknown[]) || [],
+              };
+              await db.put(config.store, fullRecord as never);
+              notifyDataUpdated(table, eventType, fullRecord);
+              return;
+            }
+          }
+          // Preserve existing local items if relational query could not be completed
+          const existing = await db.get(config.store, record.id as never);
+          const existingItems = (existing as Record<string, unknown> | undefined)?.items;
+          const fallbackRecord = {
+            ...record,
+            sync_status: 'synced',
+            ...(existingItems ? { items: existingItems } : {}),
+          };
+          await db.put(config.store, fallbackRecord as never);
+          notifyDataUpdated(table, eventType, fallbackRecord);
+          return;
+        }
         await db.put(config.store, { ...record, sync_status: 'synced' } as never);
         notifyDataUpdated(table, eventType, record);
       }
@@ -520,10 +580,17 @@ export function initRealtimeSync(): () => void {
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           console.log('[Sync] Realtime channel connected for multi-terminal sync');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn(`[Sync] Realtime channel status: ${status}, resetting channel reference`);
+          if (realtimeChannel && client) {
+            try { void client.removeChannel(realtimeChannel); } catch {}
+          }
+          realtimeChannel = null;
         }
       });
   } catch (err) {
     console.warn('[Sync] Realtime subscription init failed:', err);
+    realtimeChannel = null;
   }
 
   return () => {
