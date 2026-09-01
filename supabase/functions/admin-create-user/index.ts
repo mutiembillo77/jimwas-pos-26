@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.39.3";
+import { checkRateLimit } from "../lib/rate_limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,12 +14,14 @@ const json = (body: unknown, status = 200) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
+const ADMIN_RATE_LIMIT = { maxRequests: 10, windowSeconds: 60, keyPrefix: 'admin_create_user' };
+
 interface CreateUserPayload {
   username: string;
   email: string;
   password: string;
   fullName: string;
-  roleCode: 'cashier' | 'manager' | 'admin' | 'administrator';
+  roleCode: 'cashier' | 'manager' | 'admin';
   branchId?: string;
 }
 
@@ -72,8 +75,47 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'Caller account is inactive or profile not found.' }, 403);
   }
 
-  if (!['admin', 'administrator'].includes(callerProfile.role_code)) {
+  if (callerProfile.role_code !== 'admin') {
     return json({ error: 'Forbidden: only administrators can provision new users.' }, 403);
+  }
+
+  // 3b. Rate limit: max 10 user-creation requests per 60 s per admin user ID
+  const rateLimitResult = await checkRateLimit(adminClient, callerProfile.id, ADMIN_RATE_LIMIT);
+  if (!rateLimitResult.allowed) {
+    // Non-blocking audit log so abuse attempts are visible in the admin UI
+    adminClient.from('audit_logs').insert({
+      id: crypto.randomUUID(),
+      event_type: 'USER_CREATION_RATE_LIMITED',
+      user_id: callerProfile.id,
+      user_name: callerProfile.full_name || callerProfile.username,
+      user_role: callerProfile.role_code,
+      entity_type: 'USER',
+      entity_id: null,
+      new_value: null,
+      reason: `Rate limit exceeded: ${ADMIN_RATE_LIMIT.maxRequests} requests per ${ADMIN_RATE_LIMIT.windowSeconds}s`,
+      created_at: new Date().toISOString(),
+      sync_status: 'synced',
+    }).then(({ error }) => {
+      if (error) console.warn('[admin-create-user] Non-blocking rate-limit audit log failed:', error.message);
+    });
+
+    return new Response(
+      JSON.stringify({
+        error: 'Too many user creation requests. Please wait before trying again.',
+        retryAfter: rateLimitResult.retryAfter ?? ADMIN_RATE_LIMIT.windowSeconds,
+      }),
+      {
+        status: 429,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+          'Retry-After': String(rateLimitResult.retryAfter ?? ADMIN_RATE_LIMIT.windowSeconds),
+          'X-RateLimit-Limit': String(ADMIN_RATE_LIMIT.maxRequests),
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(rateLimitResult.resetAt),
+        },
+      }
+    );
   }
 
   // 4. Validate request payload
@@ -107,7 +149,7 @@ Deno.serve(async (req: Request) => {
     return json({ error: 'Full name is required.' }, 400);
   }
 
-  if (!['cashier', 'manager', 'admin', 'administrator'].includes(roleCode)) {
+  if (!['cashier', 'manager', 'admin'].includes(roleCode)) {
     return json({ error: 'Invalid role specified.' }, 400);
   }
 
