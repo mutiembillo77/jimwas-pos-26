@@ -8,7 +8,7 @@ export function getSupabase(): SupabaseClient | null {
 }
 
 
-let isOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
+let isOnline = typeof navigator === 'undefined' ? true : (navigator.onLine ?? true);
 let isSyncing = false;
 
 export type SyncStatus = 'synced' | 'pending' | 'syncing' | 'error' | 'offline' | 'degraded';
@@ -104,6 +104,23 @@ export interface SyncQueueItem {
 
 export async function getSyncQueueItems(): Promise<SyncQueueItem[]> {
   return (await getSyncQueue()) as SyncQueueItem[];
+}
+
+/**
+ * Derives a record's cloud sync status from a snapshot of the sync queue.
+ * Returns 'error' if the record has failed at least once (retry_count > 0),
+ * 'pending' if it is waiting for a first attempt, and 'synced' if absent.
+ */
+export function getSyncStatusForRecord(
+  queue: SyncQueueItem[],
+  tableNames: string[],
+  recordId: string
+): 'pending' | 'error' | 'synced' {
+  const item = queue.find(
+    (q) => tableNames.includes(q.table_name) && q.data.id === recordId
+  );
+  if (!item) return 'synced';
+  return (item.retry_count ?? 0) > 0 ? 'error' : 'pending';
 }
 
 export async function retrySyncItem(id: string): Promise<{ success: boolean; message: string }> {
@@ -202,9 +219,56 @@ async function triggerSync() {
     let successCount = 0;
     let failCount = 0;
 
+    // IDs of records whose outbound sync failed or were deferred this cycle.
+    // Children that depend on these parents are held without incrementing their
+    // own retry count — the failure is the parent's, not theirs.
+    const pendingParentIds = new Set<string>();
+
+    // Dependency rank: higher rank = must wait for lower rank to sync first.
+    const dependencyRank: Record<string, number> = {
+      customers: 0,
+      installment_plans: 1,
+      installment_payments: 2,
+    };
+
+    // Sort by dependency rank so parents are always attempted before children.
+    const sorted = [...queue].sort(
+      (a, b) => (dependencyRank[a.table_name] ?? 0) - (dependencyRank[b.table_name] ?? 0)
+    );
+
     const now = Date.now();
-    for (const item of queue) {
-      if (item.next_retry_at && new Date(item.next_retry_at).getTime() > now) continue;
+    for (const item of sorted) {
+      if (item.next_retry_at && new Date(item.next_retry_at).getTime() > now) {
+        // Still in backoff window — treat this parent as still pending so its
+        // children are held too.
+        if (item.data.id && typeof item.data.id === 'string') {
+          pendingParentIds.add(item.data.id);
+        }
+        continue;
+      }
+
+      // Dependency gate: defer children when their parent is not yet committed.
+      if (item.table_name === 'installment_plans') {
+        const customerId = item.data.customer_id;
+        if (typeof customerId === 'string' && pendingParentIds.has(customerId)) {
+          // Parent customer not yet committed — hold without punishing this item.
+          console.warn(`[Sync] Deferring installment_plan ${item.data.id} — customer ${customerId} not yet synced.`);
+          if (item.data.id && typeof item.data.id === 'string') {
+            pendingParentIds.add(item.data.id as string);
+          }
+          continue;
+        }
+      }
+
+      if (item.table_name === 'installment_payments') {
+        const planId = item.data.plan_id;
+        if (typeof planId === 'string' && pendingParentIds.has(planId)) {
+          // Parent plan not yet committed — hold without punishing this item.
+          console.warn(`[Sync] Deferring installment_payment ${item.data.id} — plan ${planId} not yet synced.`);
+          continue;
+        }
+      }
+
       try {
         await processSyncItem(item);
         await removeFromSyncQueue(item.id);
@@ -214,6 +278,10 @@ async function triggerSync() {
         const retryCount = (item.retry_count ?? 0) + 1;
         const retryDelay = Math.min(60 * 60 * 1000, 1000 * 2 ** Math.min(retryCount, 10));
         await addToSyncQueue({ ...item, retry_count: retryCount, next_retry_at: new Date(Date.now() + retryDelay).toISOString(), last_error: formatSyncError(error) });
+        // Mark this record's ID as pending so dependents are held this cycle.
+        if (item.data.id && typeof item.data.id === 'string') {
+          pendingParentIds.add(item.data.id as string);
+        }
         failCount++;
       }
     }
@@ -304,6 +372,16 @@ const TABLE_ALLOWED_COLUMNS: Record<string, string[]> = {
   payment_accounts: [
     'id', 'name', 'account_type', 'paybill_number', 'account_number',
     'bank_name', 'branch_name', 'code', 'created_at', 'updated_at'
+  ],
+  // Lipa Mdogo Mdogo — must match 20260619115653_001_initial_schema.sql exactly
+  installment_plans: [
+    'id', 'customer_id', 'product_id', 'product_name', 'total_amount',
+    'amount_paid', 'installment_count', 'status', 'product_released',
+    'release_date', 'notes', 'created_at', 'updated_at', 'sync_status', 'local_id'
+  ],
+  installment_payments: [
+    'id', 'plan_id', 'amount', 'payment_method', 'notes',
+    'created_at', 'sync_status', 'local_id'
   ],
 };
 

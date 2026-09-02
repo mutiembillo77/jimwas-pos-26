@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, CreditCard, CheckCircle, AlertCircle, Clock, X, User, Package, DollarSign, Calendar } from 'lucide-react';
+import { Search, Plus, CreditCard, CheckCircle, AlertCircle, Clock, X, User, Package, DollarSign, Calendar, Loader2 } from 'lucide-react';
 import {
   getAllInstallmentPlans,
   saveInstallmentPlan,
@@ -16,6 +16,10 @@ import {
   syncInsertInstallmentPayment,
   syncInsertCustomer,
   syncUpdateCustomer,
+  getSyncQueueItems,
+  getSyncStatusForRecord,
+  subscribeToSyncState,
+  subscribeToDataChanges,
 } from '../lib/sync';
 import type { InstallmentPlan, InstallmentPayment, Customer, Product } from '../lib/types';
 import type { PaymentMethod } from '../types/payment';
@@ -43,8 +47,37 @@ export function InstallmentsPage() {
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', email: '' });
 
+  // Sync queue snapshot used to compute per-plan cloud status badges.
+  const [syncQueue, setSyncQueue] = useState<Awaited<ReturnType<typeof getSyncQueueItems>>>([]);
+
   useEffect(() => {
     loadData();
+    // Load initial queue snapshot.
+    void getSyncQueueItems().then(setSyncQueue);
+  }, []);
+
+  useEffect(() => {
+    // Re-read queue whenever sync state changes (items added/removed/failed).
+    const unsubSync = subscribeToSyncState(() => {
+      void getSyncQueueItems().then(setSyncQueue);
+    });
+
+    // Refresh local data whenever a remote terminal commits installment changes.
+    const unsubData = subscribeToDataChanges((detail) => {
+      if (
+        detail.table === 'installment_plans' ||
+        detail.table === 'installment_payments' ||
+        detail.table === 'customers'
+      ) {
+        void loadData();
+        void getSyncQueueItems().then(setSyncQueue);
+      }
+    });
+
+    return () => {
+      unsubSync();
+      unsubData();
+    };
   }, []);
 
   const loadData = async () => {
@@ -297,6 +330,11 @@ export function InstallmentsPage() {
           const customer = customers.find(c => c.id === plan.customer_id);
           const progress = getProgress(plan);
           const remaining = getRemainingAmount(plan);
+          const cloudStatus = getSyncStatusForRecord(
+            syncQueue,
+            ['installment_plans', 'installment_payments'],
+            plan.id
+          );
 
           return (
             <div
@@ -315,17 +353,38 @@ export function InstallmentsPage() {
                     {customer?.name || 'Unknown Customer'}
                   </p>
                 </div>
-                <span
-                  className={`px-2 py-1 rounded text-xs font-medium ${
-                    plan.status === 'completed'
-                      ? 'bg-emerald-600/20 text-emerald-400'
-                      : plan.status === 'active'
-                      ? 'bg-blue-600/20 text-blue-400'
-                      : 'bg-red-600/20 text-red-400'
-                  }`}
-                >
-                  {plan.status}
-                </span>
+                <div className="flex flex-col items-end gap-1">
+                  <span
+                    className={`px-2 py-1 rounded text-xs font-medium ${
+                      plan.status === 'completed'
+                        ? 'bg-emerald-600/20 text-emerald-400'
+                        : plan.status === 'active'
+                        ? 'bg-blue-600/20 text-blue-400'
+                        : 'bg-red-600/20 text-red-400'
+                    }`}
+                  >
+                    {plan.status}
+                  </span>
+                  {/* Cloud sync status badge */}
+                  {cloudStatus === 'synced' && (
+                    <span className="flex items-center gap-1 text-xs text-emerald-400" title="Synced to cloud">
+                      <CheckCircle size={12} />
+                      Synced
+                    </span>
+                  )}
+                  {cloudStatus === 'pending' && (
+                    <span className="flex items-center gap-1 text-xs text-amber-400" title="Awaiting cloud sync">
+                      <Loader2 size={12} className="animate-spin" />
+                      Pending Sync
+                    </span>
+                  )}
+                  {cloudStatus === 'error' && (
+                    <span className="flex items-center gap-1 text-xs text-red-400" title="Cloud sync failed — will retry">
+                      <AlertCircle size={12} />
+                      Sync Error
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Progress bar */}
