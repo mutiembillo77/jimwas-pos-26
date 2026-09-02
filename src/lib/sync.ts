@@ -331,7 +331,7 @@ const TABLE_ALLOWED_COLUMNS: Record<string, string[]> = {
   ],
   customers: [
     'id', 'name', 'phone', 'email', 'loyalty_points', 'total_spent',
-    'created_at', 'updated_at', 'sync_status', 'local_id'
+    'created_at', 'updated_at'
   ],
   stock_movements: [
     'id', 'product_id', 'qty_delta', 'reason', 'note', 'balance_after',
@@ -398,6 +398,9 @@ export function sanitizeForSupabase(table: string, data: Record<string, unknown>
     if (col in data && data[col] !== undefined) {
       clean[col] = data[col];
     }
+  }
+  if (table === 'stock_movements' && clean.reference_type === 'sale') {
+    clean.reference_type = 'transaction';
   }
   return clean;
 }

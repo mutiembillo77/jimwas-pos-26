@@ -378,3 +378,71 @@ describe('Test 10 [LOCAL EVENT CONSUMER]: subscribeToDataChanges fires on window
     unsub();
   });
 });
+
+// TEST 11 [SCHEMA COMPATIBILITY]: customers sanitizer strips non-existent columns (PGRST204 Guard)
+describe('Test 11 [SCHEMA COMPATIBILITY]: customers sanitizer strips non-existent columns', () => {
+  it('removes sync_status and local_id from customers payload', () => {
+    const rawCustomer = {
+      id: 'cust-123',
+      name: 'Austin',
+      phone: '+254700000000',
+      email: 'austin@example.com',
+      loyalty_points: 10,
+      total_spent: 8500,
+      created_at: '2026-09-01T08:00:00Z',
+      updated_at: '2026-09-02T10:00:00Z',
+      sync_status: 'pending',
+      local_id: 'loc-cust-123',
+    };
+
+    const sanitized = sanitizeForSupabase('customers', rawCustomer);
+
+    expect(sanitized.id).toBe('cust-123');
+    expect(sanitized.name).toBe('Austin');
+    expect(sanitized.phone).toBe('+254700000000');
+    expect(sanitized.email).toBe('austin@example.com');
+    expect(sanitized.loyalty_points).toBe(10);
+    expect(sanitized.total_spent).toBe(8500);
+    expect(sanitized.created_at).toBe('2026-09-01T08:00:00Z');
+    expect(sanitized.updated_at).toBe('2026-09-02T10:00:00Z');
+
+    // MUST NOT contain non-existent PostgreSQL columns
+    expect('sync_status' in sanitized).toBe(false);
+    expect('local_id' in sanitized).toBe(false);
+  });
+});
+
+// TEST 12 [SCHEMA COMPATIBILITY]: stock_movements reference_type check constraint compliance (23514 Guard)
+describe('Test 12 [SCHEMA COMPATIBILITY]: stock_movements reference_type check constraint compliance', () => {
+  it('maps reference_type "sale" to "transaction"', () => {
+    const rawMovement = {
+      id: 'sm-1',
+      product_id: 'prod-1',
+      qty_delta: -1,
+      reason: 'sale',
+      note: 'POS sale',
+      balance_after: 5,
+      reference_type: 'sale',
+      reference_id: 'tx-123',
+      created_at: '2026-09-02T10:00:00Z',
+      created_by: 'Cashier 1',
+    };
+
+    const sanitized = sanitizeForSupabase('stock_movements', rawMovement);
+    expect(sanitized.reference_type).toBe('transaction');
+  });
+
+  it('preserves valid reference_types: transaction, delivery, adjustment, return', () => {
+    for (const validRef of ['transaction', 'delivery', 'adjustment', 'return']) {
+      const sanitized = sanitizeForSupabase('stock_movements', {
+        id: 'sm-x',
+        product_id: 'prod-1',
+        qty_delta: 1,
+        reason: 'restock',
+        balance_after: 10,
+        reference_type: validRef,
+      });
+      expect(sanitized.reference_type).toBe(validRef);
+    }
+  });
+});
