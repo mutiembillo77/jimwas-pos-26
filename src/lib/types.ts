@@ -359,3 +359,175 @@ export interface SafeDropRecord {
   created_at: string;
   sync_status: EnterpriseSyncStatus;
 }
+
+export type SalesDataSource = 'POS_TRANSACTION' | 'IMPORTED' | 'MANUAL_HISTORICAL' | 'RECOVERED' | 'ESTIMATED' | 'BUSINESS_PROVIDED_HISTORICAL';
+export type DailyReconciliationStatus = 'COMPLETE' | 'PARTIAL' | 'MISSING' | 'RECONCILED' | 'UNRESOLVED' | 'VARIANCE_WARNING';
+export type ApprovalStatus = 'PENDING_APPROVAL' | 'PENDING_REVIEW' | 'VERIFIED_MANUAL' | 'REJECTED';
+
+export type DualSourceReconciliationStatus =
+  | 'MATCH / CROSS_VALIDATED'
+  | 'CONFLICTING / INVESTIGATION_REQUIRED'
+  | 'HISTORICAL_PENDING_APPROVAL'
+  | 'POS_RECOVERED_ONLY'
+  | 'MISSING_DATA';
+
+export type SourceAvailability =
+  | 'POS_PRESENT'
+  | 'HISTORICAL_PRESENT'
+  | 'BOTH_PRESENT'
+  | 'NEITHER_PRESENT';
+
+export type ReconciliationStatusDimension =
+  | 'EXACT_MATCH'
+  | 'CONFLICTING'
+  | 'HISTORICAL_ONLY'
+  | 'POS_ONLY'
+  | 'PARTIAL_POS'
+  | 'UNRESOLVED';
+
+export type EvidenceStrength =
+  | 'PRIMARY_POS_COMPLETE'
+  | 'PRIMARY_POS_PARTIAL'
+  | 'INDEPENDENT_BUSINESS_RECORD'
+  | 'BUSINESS_PROVIDED_HISTORICAL'
+  | 'INSUFFICIENT_EVIDENCE';
+
+export type AuditApprovalStatus =
+  | 'PENDING_APPROVAL'
+  | 'VERIFIED_MANUAL'
+  | 'REJECTED';
+
+export interface AuditTrailEntry {
+  action: string;
+  timestamp: string;
+  actor: string;
+  details?: string;
+}
+
+export interface HistoricalDailySales {
+  id: string;
+  business_date: string; // YYYY-MM-DD
+  branch_id?: string;
+  source: SalesDataSource;
+  source_type?: SalesDataSource;
+  status: DailyReconciliationStatus;
+  approval_status?: ApprovalStatus;
+  preparer?: string;
+  reviewer?: string;
+  approval_timestamp?: string;
+  source_reference?: string;
+  evidence_notes?: string;
+  audit_trail?: AuditTrailEntry[];
+  transaction_count: number;
+  gross_sales: number;
+  discounts: number;
+  refunds: number;
+  tax: number;
+  net_sales: number;
+  cash_sales: number;
+  mpesa_sales: number;
+  other_sales: number;
+  eod_total: number;
+  opening_float?: number;
+  closing_cash_count?: number;
+  cash_variance?: number;
+  notes?: string;
+  reference?: string;
+  entered_by?: string;
+  entered_by_name?: string;
+  approved_by?: string;
+  created_at: string;
+  updated_at: string;
+  sync_status: 'pending' | 'synced' | 'error';
+  warnings?: string[];
+  is_locked?: boolean;
+}
+
+export interface DualSourceReconciliationRow {
+  date: string;          // YYYY-MM-DD
+  day_name: string;      // Mon, Tue, etc.
+  day_number: number;    // 1..31
+  is_open: boolean;
+  pos_recovered_amount: number | null;
+  pos_transaction_count: number;
+  historical_figure: number | null;
+  difference: number | null;
+  final_status: DualSourceReconciliationStatus;
+  source_availability: SourceAvailability;
+  reconciliation_status: ReconciliationStatusDimension;
+  evidence_strength: EvidenceStrength;
+  approval_status: AuditApprovalStatus;
+  accepted_amount: number | null;
+  evidence: string;
+  is_sandbox_excluded?: boolean;
+}
+
+export interface DailySalesRow {
+  date: string;          // YYYY-MM-DD
+  day_name: string;      // Mon, Tue, etc.
+  day_number: number;    // 1..31
+  source: SalesDataSource;
+  status: DailyReconciliationStatus;
+  transaction_count: number;
+  gross_sales: number;
+  discounts: number;
+  refunds: number;
+  tax: number;
+  net_sales: number;
+  cash_sales: number;
+  mpesa_sales: number;
+  other_sales: number;
+  eod_total: number;
+  shift_record?: ShiftRecord;
+  manual_record?: HistoricalDailySales;
+  warnings: string[];
+  is_editable: boolean;
+}
+
+export interface WeeklySalesSummary {
+  week_number: number;
+  date_range_label: string;
+  start_date: string;
+  end_date: string;
+  trading_days: number;
+  complete_days: number;
+  missing_days: number;
+  manual_days: number;
+  recovered_days: number;
+  transaction_count: number;
+  gross_sales: number;
+  discounts: number;
+  refunds: number;
+  tax: number;
+  net_sales: number;
+  cash_sales: number;
+  mpesa_sales: number;
+  other_sales: number;
+  eod_total: number;
+  days: DailySalesRow[];
+}
+
+export interface MonthEndSalesSummary {
+  month_label: string;
+  year: number;
+  month: number;
+  total_calendar_days: number;
+  trading_days: number;
+  pos_derived_days: number;
+  recovered_days: number;
+  manual_days: number;
+  missing_days: number;
+  total_transactions: number;
+  gross_sales: number;
+  discounts: number;
+  refunds: number;
+  tax: number;
+  net_sales: number;
+  cash_sales: number;
+  mpesa_sales: number;
+  other_sales: number;
+  total_eod_sales: number;
+  weeks: WeeklySalesSummary[];
+  daily_rows: DailySalesRow[];
+}
+
