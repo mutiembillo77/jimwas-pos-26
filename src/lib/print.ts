@@ -1,4 +1,6 @@
 import { BusinessSettings, ReceiptSettings } from './settings-types';
+import type { AuthoritativeDashboardKPIs, DailyTransactionSummary } from './reporting';
+import type { Customer, Product, Transaction } from './types';
 
 export interface PrintTransaction {
   id: string;
@@ -16,6 +18,11 @@ export interface PrintTransaction {
   payment_account_name?: string | null;
   payment_account_paybill?: string | null;
   payment_account_number?: string | null;
+  payment_account?: string;
+  delivery_type?: string;
+  delivery_fee?: number;
+  discount?: number;
+  subtotal?: number;
   created_at: string;
   customer_name?: string;
   customer_phone?: string;
@@ -338,6 +345,37 @@ export function buildReceiptHtml(options: PrintOptions): string {
   /*
    * Totals
    */
+  const subtotal = transaction.subtotal !== undefined
+    ? transaction.subtotal
+    : transaction.items.reduce((sum, it) => sum + it.subtotal, 0);
+  const discount = transaction.discount ?? 0;
+  const deliveryFee = transaction.delivery_fee ?? 0;
+
+  lines.push(divider);
+
+  lines.push(
+    formatLine(
+      'Subtotal:',
+      `KES ${subtotal.toLocaleString()}`,
+    ),
+  );
+
+  if (discount > 0 || transaction.discount !== undefined) {
+    lines.push(
+      formatLine(
+        'Discount:',
+        `KES ${discount.toLocaleString()}`,
+      ),
+    );
+  }
+
+  lines.push(
+    formatLine(
+      'Delivery:',
+      `KES ${deliveryFee.toLocaleString()}`,
+    ),
+  );
+
   lines.push(divider);
 
   lines.push(
@@ -362,7 +400,7 @@ export function buildReceiptHtml(options: PrintOptions): string {
   );
 
   /*
-   * Payment method
+   * Payment method & account
    */
   const paymentMethod =
     transaction.payment_method || 'unknown';
@@ -388,13 +426,14 @@ export function buildReceiptHtml(options: PrintOptions): string {
     resolvePaymentAccountDetails(transaction);
 
   const accountLabel =
+    transaction.payment_account ||
     accountInfo.name ||
     transaction.payment_account_name ||
     (
       paymentMethodLower === 'cash'
         ? 'CASH'
-        : paymentMethodLower === 'kcb'
-          ? 'KCB'
+        : paymentMethodLower === 'kcb' || paymentMethodLower === 'kcb_buni'
+          ? 'MPESA'
           : paymentMethodLower === 'ncba'
             ? 'NCBA'
             : 'Unassigned'
@@ -402,7 +441,7 @@ export function buildReceiptHtml(options: PrintOptions): string {
 
   lines.push(
     formatLine(
-      'Account:',
+      'Payment Account:',
       accountLabel,
     ),
   );
@@ -459,8 +498,7 @@ export function buildReceiptHtml(options: PrintOptions): string {
    * Escape receipt content before injecting it into HTML.
    */
   const safeText = escapeHtml(text);
-  const safeTransactionId =
-    escapeHtml(transaction.id);
+  const safeTransactionId = escapeHtml(transaction.id);
 
   return `<!DOCTYPE html>
 <html>
@@ -486,7 +524,7 @@ export function buildReceiptHtml(options: PrintOptions): string {
       font-size: ${fontSize};
       line-height: 1.4;
       padding: 8px;
-      width: ${receipt.paper_width};
+      width: ${paperWidth}mm;
     }
 
     pre {
@@ -500,7 +538,7 @@ export function buildReceiptHtml(options: PrintOptions): string {
     @media print {
       html,
       body {
-        width: ${receipt.paper_width};
+        width: ${paperWidth}mm;
       }
 
       body {
@@ -509,7 +547,7 @@ export function buildReceiptHtml(options: PrintOptions): string {
 
       @page {
         margin: 4mm;
-        size: ${receipt.paper_width} auto;
+        size: ${paperWidth}mm auto;
       }
     }
   </style>
@@ -887,4 +925,271 @@ export function clearReceiptHistory(): void {
       error,
     );
   }
+}
+
+export interface CombinedDashboardReportOptions {
+  business: BusinessSettings;
+  receipt?: ReceiptSettings;
+  periodLabel: string;
+  generatedAt?: Date;
+  cashierName?: string;
+  kpis: AuthoritativeDashboardKPIs;
+  dailySummaries: DailyTransactionSummary[];
+  detailedTransactions: Transaction[];
+  customers: Customer[];
+  products: Product[];
+}
+
+export function buildCombinedDashboardReportHtml(options: CombinedDashboardReportOptions): string {
+  const {
+    business,
+    periodLabel,
+    generatedAt = new Date(),
+    cashierName = 'System',
+    kpis,
+    dailySummaries,
+    detailedTransactions,
+    customers,
+    products,
+  } = options;
+
+  const stockMap = new Map(products.map((p) => [p.id, p]));
+  const customerMap = new Map(customers.map((c) => [c.id, c.name]));
+
+  // Build rows for Section B (Daily Detailed Report)
+  const detailedRows = detailedTransactions.flatMap((tx) => {
+    const cust = tx.customer_name || (tx.customer_id ? customerMap.get(tx.customer_id) : null) || 'Walk-in';
+    const txDate = new Date(tx.created_at);
+    const dateStr = `${txDate.toLocaleDateString()}<br><small style="color:#64748b">${txDate.toLocaleTimeString()}</small>`;
+    const paymentAcct = tx.payment_account || (tx.payment_account_name ? tx.payment_account_name : tx.payment_method?.toUpperCase() || 'CASH');
+    const codStatus = tx.payment_method === 'cod' ? (tx.cod_status === 'PAID' ? 'COD Paid' : 'COD Pending') : tx.payment_method;
+
+    return (tx.items || []).map((item) => {
+      const prod = stockMap.get(item.product_id);
+      const stock = prod ? prod.stock : 0;
+      const stockClass = stock <= 0 ? 'out' : stock <= (prod?.low_stock_alert || 5) ? 'low' : 'ok';
+      const stockText = stock <= 0 ? 'Out of stock' : `${stock} in stock`;
+
+      return `<tr>
+        <td>${dateStr}</td>
+        <td><strong>${escapeHtml(cust)}</strong><br><small style="color:#64748b">${escapeHtml(tx.id.slice(0, 12))}</small></td>
+        <td><strong>${escapeHtml(item.product_name)}</strong><br><small style="color:#64748b">${item.quantity} &times; KES ${item.unit_price.toLocaleString()}</small></td>
+        <td style="text-align:center">${item.quantity}</td>
+        <td><span class="badge ${stockClass}">${stockText}</span></td>
+        <td style="text-align:right; font-weight:600">KES ${item.subtotal.toLocaleString()}</td>
+        <td style="text-align:center"><span class="badge method">${escapeHtml(codStatus)}</span></td>
+        <td style="text-align:center"><strong>${escapeHtml(paymentAcct)}</strong></td>
+      </tr>`;
+    });
+  }).join('');
+
+  // Daily Summary Rows
+  const dailySummaryRows = dailySummaries.map((day) => {
+    return `<tr>
+      <td><strong>${day.dayLabel}</strong></td>
+      <td style="text-align:center">${day.transactionCount}</td>
+      <td style="text-align:right">KES ${day.subtotal.toLocaleString()}</td>
+      <td style="text-align:right">${day.discounts > 0 ? `KES ${day.discounts.toLocaleString()}` : '-'}</td>
+      <td style="text-align:right">${day.deliveryFees > 0 ? `KES ${day.deliveryFees.toLocaleString()}` : '-'}</td>
+      <td style="text-align:right; font-weight:700; color:#047857">KES ${day.totalSales.toLocaleString()}</td>
+      <td>
+        <small style="color:#475569">
+          ${day.paymentAccounts.CASH > 0 ? `CASH: ${day.paymentAccounts.CASH.toLocaleString()} ` : ''}
+          ${day.paymentAccounts.MPESA > 0 ? `MPESA: ${day.paymentAccounts.MPESA.toLocaleString()} ` : ''}
+          ${day.paymentAccounts.KCB > 0 ? `KCB: ${day.paymentAccounts.KCB.toLocaleString()} ` : ''}
+          ${day.paymentAccounts.NCBA > 0 ? `NCBA: ${day.paymentAccounts.NCBA.toLocaleString()} ` : ''}
+        </small>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Jimwas POS — Combined Executive KPI & Detailed Sales Report</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; color: #1e293b; margin: 24px; font-size: 13px; line-height: 1.4; }
+    .header { border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-start; }
+    .header h1 { margin: 0 0 4px 0; font-size: 22px; color: #0f172a; }
+    .header p { margin: 2px 0; color: #64748b; font-size: 12px; }
+    .actions { margin: 16px 0 24px; display: flex; gap: 10px; }
+    .btn { padding: 8px 16px; border: 0; border-radius: 6px; background: #059669; color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }
+    .section-title { font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #0f172a; border-left: 4px solid #059669; padding-left: 8px; margin: 24px 0 12px; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+    .kpi-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; break-inside: avoid; }
+    .kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; margin-bottom: 4px; }
+    .kpi-value { font-size: 20px; font-weight: 700; color: #0f172a; }
+    .kpi-subtext { font-size: 11px; color: #64748b; margin-top: 2px; }
+    .accounts-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+    .account-card { background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; break-inside: avoid; }
+    .account-card .name { font-weight: 700; font-size: 13px; color: #1e293b; }
+    .account-card .amt { font-size: 16px; font-weight: 700; color: #059669; margin: 4px 0 2px; }
+    .account-card .meta { font-size: 11px; color: #64748b; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+    th, td { border: 1px solid #e2e8f0; padding: 8px; vertical-align: top; text-align: left; }
+    th { background: #f1f5f9; font-weight: 600; color: #334155; }
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; }
+    .badge.ok { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+    .badge.low { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+    .badge.out { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    .badge.method { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; text-transform: uppercase; }
+    .page-break { page-break-before: always; margin-top: 24px; }
+    @media print {
+      body { margin: 10mm; font-size: 11px; }
+      .actions { display: none; }
+      @page { margin: 10mm; size: A4 portrait; }
+      .kpi-grid, .accounts-grid, table { break-inside: auto; }
+      tr { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="actions">
+    <button class="btn" onclick="window.print()">Print / Save as PDF</button>
+  </div>
+
+  <div class="header">
+    <div>
+      <h1>${escapeHtml(business.business_name || 'Jimwas Hardware & Electricals')}</h1>
+      <p><strong>Period:</strong> ${escapeHtml(periodLabel)} &nbsp;|&nbsp; <strong>Generated:</strong> ${generatedAt.toLocaleString()} &nbsp;|&nbsp; <strong>Cashier:</strong> ${escapeHtml(cashierName)}</p>
+      <p>${escapeHtml(business.business_address || '')} ${business.business_phone ? `&bull; Tel: ${escapeHtml(business.business_phone)}` : ''}</p>
+    </div>
+    <div style="text-align: right">
+      <div style="font-size: 16px; font-weight: 700; color: #059669">EXECUTIVE REPORT</div>
+      <div style="font-size: 11px; color: #64748b">RECONCILED FINANCIAL REPORT</div>
+    </div>
+  </div>
+
+  <!-- SECTION A: DASHBOARD / KPI SUMMARY -->
+  <div class="section-title">SECTION A &mdash; DASHBOARD KPI SUMMARY</div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Total Sales (Net)</div>
+      <div class="kpi-value" style="color: #059669">KES ${kpis.totalSales.toLocaleString()}</div>
+      <div class="kpi-subtext">Merchandise + Delivery - Discounts</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Merchandise Subtotal</div>
+      <div class="kpi-value">KES ${kpis.subtotal.toLocaleString()}</div>
+      <div class="kpi-subtext">Product merchandise sum</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Total Delivery Fees</div>
+      <div class="kpi-value" style="color: #d97706">KES ${kpis.totalDeliveryFees.toLocaleString()}</div>
+      <div class="kpi-subtext">Tracked separately from goods</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Total Discounts</div>
+      <div class="kpi-value">KES ${kpis.totalDiscounts.toLocaleString()}</div>
+      <div class="kpi-subtext">Deducted from sales</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Completed Transactions</div>
+      <div class="kpi-value">${kpis.totalTransactions}</div>
+      <div class="kpi-subtext">Active completed sales</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Avg. Transaction Value</div>
+      <div class="kpi-value">KES ${Math.round(kpis.averageTransactionValue).toLocaleString()}</div>
+      <div class="kpi-subtext">Per sale average</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Unique Customers</div>
+      <div class="kpi-value">${kpis.uniqueCustomers}</div>
+      <div class="kpi-subtext">Purchasing clients in period</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Reconciled Total</div>
+      <div class="kpi-value" style="color: #059669">KES ${kpis.paymentAccounts.totalAmount.toLocaleString()}</div>
+      <div class="kpi-subtext">100% reconciled to payment accounts</div>
+    </div>
+  </div>
+
+  <div style="font-weight: 600; font-size: 13px; margin: 12px 0 6px; color: #1e293b">PAYMENT ACCOUNT SUMMARY</div>
+  <div class="accounts-grid">
+    <div class="account-card">
+      <div class="name">CASH</div>
+      <div class="amt">KES ${kpis.paymentAccounts.CASH.amount.toLocaleString()}</div>
+      <div class="meta">${kpis.paymentAccounts.CASH.count} sales &bull; ${kpis.paymentAccounts.CASH.percentage}% share</div>
+    </div>
+    <div class="account-card">
+      <div class="name">MPESA (KCB BUNI)</div>
+      <div class="amt">KES ${kpis.paymentAccounts.MPESA.amount.toLocaleString()}</div>
+      <div class="meta">${kpis.paymentAccounts.MPESA.count} sales &bull; ${kpis.paymentAccounts.MPESA.percentage}% share</div>
+    </div>
+    <div class="account-card">
+      <div class="name">KCB BANK</div>
+      <div class="amt">KES ${kpis.paymentAccounts.KCB.amount.toLocaleString()}</div>
+      <div class="meta">${kpis.paymentAccounts.KCB.count} sales &bull; ${kpis.paymentAccounts.KCB.percentage}% share</div>
+    </div>
+    <div class="account-card">
+      <div class="name">NCBA BANK</div>
+      <div class="amt">KES ${kpis.paymentAccounts.NCBA.amount.toLocaleString()}</div>
+      <div class="meta">${kpis.paymentAccounts.NCBA.count} sales &bull; ${kpis.paymentAccounts.NCBA.percentage}% share</div>
+    </div>
+  </div>
+
+  <div style="font-weight: 600; font-size: 13px; margin: 12px 0 6px; color: #1e293b">DAILY SALES BREAKDOWN (${dailySummaries.length} DAYS)</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th style="text-align:center">Sales Count</th>
+        <th style="text-align:right">Subtotal</th>
+        <th style="text-align:right">Discounts</th>
+        <th style="text-align:right">Delivery</th>
+        <th style="text-align:right">Net Total</th>
+        <th>Payment Account Distribution</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${dailySummaryRows || '<tr><td colspan="7" style="text-align:center">No daily sales for this period</td></tr>'}
+    </tbody>
+  </table>
+
+  <!-- SECTION B: DAILY DETAILED REPORT -->
+  <div class="page-break"></div>
+  <div class="section-title">SECTION B &mdash; DAILY DETAILED REPORT (LINE ITEMS)</div>
+  <p style="color: #64748b; font-size: 12px; margin-top: -6px; margin-bottom: 12px">Full transaction inventory lines and live stock status as of report generation.</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Date & Time</th>
+        <th>Customer / Tx ID</th>
+        <th>Product Description</th>
+        <th style="text-align:center">Qty</th>
+        <th>Current Stock</th>
+        <th style="text-align:right">Line Amount</th>
+        <th style="text-align:center">Payment / COD</th>
+        <th style="text-align:center">Account</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${detailedRows || '<tr><td colspan="8" style="text-align:center">No detailed line items for this period</td></tr>'}
+    </tbody>
+  </table>
+
+  <div style="margin-top: 24px; padding-top: 12px; border-top: 2px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center">
+    <p style="font-weight: 600; color: #0f172a; margin: 0">Thank You For Shopping With Us &bull; Jimwas POS</p>
+    <p style="font-size: 12px; color: #64748b; margin: 0">Official Accounting Record</p>
+  </div>
+</body>
+</html>`;
+}
+
+export function previewCombinedDashboardReport(options: CombinedDashboardReportOptions): void {
+  const html = buildCombinedDashboardReportHtml(options);
+  const win = window.open('', '_blank');
+  if (!win) {
+    console.warn('Combined report popup was blocked by browser.');
+    return;
+  }
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  win.focus();
 }

@@ -5,7 +5,16 @@ import { syncInsertCustomer, syncUpdateCustomer, syncInsertLoyaltyTransaction, s
 import { logCustomerCreated, logCustomerUpdated } from '../lib/audit';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
-import type { Customer, LoyaltyTransaction } from '../lib/types';
+import type { Customer, LoyaltyTransaction, CustomerSource } from '../lib/types';
+
+export const CUSTOMER_SOURCE_OPTIONS: { value: CustomerSource; label: string }[] = [
+  { value: 'WALK_IN', label: 'Walk-in' },
+  { value: 'WHATSAPP', label: 'WhatsApp' },
+  { value: 'FACEBOOK', label: 'Facebook' },
+  { value: 'INSTAGRAM', label: 'Instagram' },
+  { value: 'REFERRAL', label: 'Referral' },
+  { value: 'OTHER', label: 'Other' },
+];
 
 export function CustomersPage() {
   const { user } = useAuth();
@@ -15,7 +24,12 @@ export function CustomersPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDetails, setShowDetails] = useState<Customer | null>(null);
   const [loyaltyHistory, setLoyaltyHistory] = useState<LoyaltyTransaction[]>([]);
-  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', email: '' });
+  const [newCustomer, setNewCustomer] = useState<{ name: string; phone: string; email: string; customer_source: CustomerSource }>({
+    name: '',
+    phone: '',
+    email: '',
+    customer_source: 'WALK_IN',
+  });
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [redeemPoints, setRedeemPoints] = useState('');
   const [showRedeem, setShowRedeem] = useState(false);
@@ -52,6 +66,7 @@ export function CustomersPage() {
       name: newCustomer.name,
       phone: newCustomer.phone,
       email: newCustomer.email,
+      customer_source: newCustomer.customer_source || 'WALK_IN',
       loyalty_points: 0,
       total_spent: 0,
       created_at: new Date().toISOString(),
@@ -63,7 +78,7 @@ export function CustomersPage() {
     syncInsertCustomer(customer);
     await logCustomerCreated(customer.id, customer, user?.id);
     toast.show('Customer added successfully');
-    setNewCustomer({ name: '', phone: '', email: '' });
+    setNewCustomer({ name: '', phone: '', email: '', customer_source: 'WALK_IN' });
     setShowAddModal(false);
     loadCustomers();
   };
@@ -273,6 +288,11 @@ export function CustomersPage() {
                       {customer.phone}
                     </p>
                   )}
+                  {customer.customer_source && customer.customer_source !== 'UNKNOWN' && (
+                    <span className="inline-block mt-1 px-2 py-0.5 text-xs rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/50 font-medium">
+                      {customer.customer_source.replace('_', ' ')}
+                    </span>
+                  )}
                 </div>
               </div>
               <button
@@ -358,6 +378,18 @@ export function CustomersPage() {
                   className="w-full px-4 py-3 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-emerald-500 focus:outline-none"
                 />
               </div>
+              <div>
+                <label className="text-sm text-slate-400 block mb-2">Acquisition Channel / Source</label>
+                <select
+                  value={newCustomer.customer_source}
+                  onChange={(e) => setNewCustomer({ ...newCustomer, customer_source: e.target.value as CustomerSource })}
+                  className="w-full px-4 py-3 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-emerald-500 focus:outline-none"
+                >
+                  {CUSTOMER_SOURCE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
 
               <button
                 onClick={handleAddCustomer}
@@ -409,6 +441,19 @@ export function CustomersPage() {
                   onChange={(e) => setEditingCustomer({ ...editingCustomer, email: e.target.value })}
                   className="w-full px-4 py-3 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-emerald-500 focus:outline-none"
                 />
+              </div>
+              <div>
+                <label className="text-sm text-slate-400 block mb-2">Acquisition Channel / Source</label>
+                <select
+                  value={editingCustomer.customer_source || 'UNKNOWN'}
+                  onChange={(e) => setEditingCustomer({ ...editingCustomer, customer_source: e.target.value as CustomerSource })}
+                  className="w-full px-4 py-3 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-emerald-500 focus:outline-none"
+                >
+                  <option value="UNKNOWN">Unknown / Unrecorded</option>
+                  {CUSTOMER_SOURCE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
               </div>
 
               <button

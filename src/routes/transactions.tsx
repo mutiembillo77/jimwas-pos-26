@@ -4,13 +4,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search, Printer, Trash2, RefreshCw, TrendingUp, TrendingDown,
-  AlertCircle, Smartphone, DollarSign, Banknote
+  AlertCircle, Smartphone, DollarSign, Banknote, Eye
 } from 'lucide-react';
 import { getAllTransactions, getBusinessSettings, getReceiptSettings, getTransaction, getAllKCBPayments } from '../lib/db';
 import { printReceipt } from '../lib/print';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { VoidTransactionModal } from '../components/VoidTransactionModal';
+import { TransactionDetailModal } from '../components/TransactionDetailModal';
 import { subscribeToDataChanges } from '../lib/sync';
 import type { Transaction } from '../lib/types';
 
@@ -51,6 +52,10 @@ export function TransactionsPage() {
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [showVoidModal, setShowVoidModal] = useState(false);
   const [canVoid, setCanVoid] = useState(false);
+
+  // Detail modal
+  const [detailTransaction, setDetailTransaction] = useState<Transaction | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
 
   // Cache raw POS Transaction objects by ID so void lookup doesn't depend on IndexedDB
   const posTransactionCacheRef = useRef<Map<string, Transaction>>(new Map());
@@ -513,6 +518,35 @@ export function TransactionsPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex justify-center gap-2">
+                          <button
+                            onClick={() => {
+                              const cached = posTransactionCacheRef.current.get(txn.id);
+                              if (cached) {
+                                setDetailTransaction(cached);
+                                setShowDetailModal(true);
+                              } else {
+                                setDetailTransaction({
+                                  id: txn.id,
+                                  total_amount: txn.amount,
+                                  amount_paid: txn.amount,
+                                  change_amount: 0,
+                                  payment_method: txn.payment_method,
+                                  status: txn.status,
+                                  created_at: txn.created_at,
+                                  customer_name: txn.customer_name,
+                                  customer_phone: txn.phone,
+                                  cashier_name: txn.cashier_name,
+                                  items: [],
+                                  sync_status: 'synced',
+                                });
+                                setShowDetailModal(true);
+                              }
+                            }}
+                            className="p-1 hover:bg-slate-700 rounded-lg transition text-slate-400 hover:text-emerald-400"
+                            title="View transaction details"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
                           {txn.type === 'sale' && (
                             <button
                               onClick={() => handlePrintReceipt(txn)}
@@ -542,6 +576,16 @@ export function TransactionsPage() {
           )}
         </div>
       </div>
+
+      {/* Transaction Detail Modal */}
+      <TransactionDetailModal
+        transaction={detailTransaction}
+        isOpen={showDetailModal}
+        onClose={() => {
+          setShowDetailModal(false);
+          setDetailTransaction(null);
+        }}
+      />
 
       {/* Void Transaction Modal */}
       <VoidTransactionModal

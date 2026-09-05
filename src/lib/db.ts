@@ -30,6 +30,7 @@ import type {
   SupplierFulfillment,
   ReportSchedule,
   SafeDropRecord,
+  CustomerSource,
 } from './types';
 
 export interface POSDatabase extends DBSchema {
@@ -40,6 +41,7 @@ export interface POSDatabase extends DBSchema {
       name: string;
       phone?: string;
       email?: string;
+      customer_source?: CustomerSource;
       loyalty_points: number;
       total_spent: number;
       created_at: string;
@@ -92,6 +94,12 @@ export interface POSDatabase extends DBSchema {
       cashier_name?: string;
       branch_id?: string;
       mpesa_receipt?: string;
+      idempotency_key?: string;
+      payment_account?: string;
+      delivery_type?: string;
+      delivery_fee?: number;
+      discount?: number;
+      subtotal?: number;
     };
   };
   transaction_items: {

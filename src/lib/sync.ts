@@ -318,7 +318,8 @@ const TABLE_ALLOWED_COLUMNS: Record<string, string[]> = {
     'id', 'customer_id', 'total_amount', 'amount_paid', 'change_amount',
     'payment_method', 'status', 'notes', 'created_at', 'sync_status',
     'local_id', 'cashier_id', 'cashier_name', 'branch_id', 'payment_timing',
-    'is_cod', 'cod_status', 'mpesa_receipt', 'environment'
+    'is_cod', 'cod_status', 'mpesa_receipt', 'environment',
+    'payment_account', 'delivery_type', 'delivery_fee', 'discount', 'subtotal'
   ],
   transaction_items: [
     'id', 'transaction_id', 'product_id', 'product_name', 'quantity',
@@ -331,7 +332,7 @@ const TABLE_ALLOWED_COLUMNS: Record<string, string[]> = {
   ],
   customers: [
     'id', 'name', 'phone', 'email', 'loyalty_points', 'total_spent',
-    'created_at', 'updated_at'
+    'customer_source', 'created_at', 'updated_at'
   ],
   stock_movements: [
     'id', 'product_id', 'qty_delta', 'reason', 'note', 'balance_after',
@@ -803,10 +804,10 @@ export async function syncInsertTransaction(transaction: unknown, items: unknown
     return;
   }
   try {
-    const { error: txError } = await getSupabase()!.from('transactions').insert(sanitizedTx);
+    const { error: txError } = await getSupabase()!.from('transactions').upsert(sanitizedTx, { onConflict: 'id', ignoreDuplicates: false });
     if (txError) throw txError;
     if (sanitizedItems.length > 0) {
-      const { error: itemsError } = await getSupabase()!.from('transaction_items').insert(sanitizedItems);
+      const { error: itemsError } = await getSupabase()!.from('transaction_items').upsert(sanitizedItems, { onConflict: 'id', ignoreDuplicates: false });
       if (itemsError) throw itemsError;
     }
   } catch {

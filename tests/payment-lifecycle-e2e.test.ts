@@ -52,6 +52,10 @@ describe('JIMWAS Payment Ecosystem — Controlled End-to-End Lifecycle Verificat
       return tx;
     });
 
+    vi.spyOn(dbModule, 'getTransaction').mockImplementation(async (id: string) => {
+      return savedTransactions.find((t) => t.id === id) || null;
+    });
+
     vi.spyOn(dbModule, 'saveStockMovement').mockImplementation(async (m: any) => {
       savedStockMovements.push(m);
       return m;

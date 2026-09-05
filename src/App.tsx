@@ -7,6 +7,7 @@ import { ProductsPage } from './routes/products';
 import { InventoryPage } from './routes/inventory';
 import { InstallmentsPage } from './routes/installments';
 import { DashboardPage } from './routes/dashboard';
+import { AnalyticsPage } from './routes/analytics';
 import { LoginPage } from './routes/login';
 import { SecurityDashboardPage } from './routes/security';
 import { SettingsPage } from './routes/settings';
@@ -81,6 +82,8 @@ function AppContent() {
         return <ProtectedRoute routePath="/installments" fallback={accessDenied}><InstallmentsPage /></ProtectedRoute>;
       case 'dashboard':
         return <ProtectedRoute routePath="/dashboard" fallback={accessDenied}><DashboardPage /></ProtectedRoute>;
+      case 'analytics':
+        return <ProtectedRoute routePath="/analytics" fallback={accessDenied}><AnalyticsPage /></ProtectedRoute>;
       case 'security':
         return <ProtectedRoute routePath="/security" fallback={accessDenied}><SecurityDashboardPage /></ProtectedRoute>;
       case 'settings':

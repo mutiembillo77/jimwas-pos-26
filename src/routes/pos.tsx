@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Plus, Minus, Trash2, Search, User, ShoppingCart, Banknote, Smartphone, Landmark, X, Package, Archive, ArchiveRestore, Loader2, CheckCircle2, XCircle, AlertCircle, Clock, FlaskConical, Zap, Printer } from 'lucide-react';
 import { generateId, saveProduct, getAllProducts, getAllCustomers, saveCustomer, getKCBSettings, getBusinessSettings, getReceiptSettings, getTransaction, getAllPaymentAccounts } from '../lib/db';
 import { syncInsertCustomer, syncInsertProduct, getSupabase, getOnlineStatus, subscribeToDataChanges } from '../lib/sync';
@@ -11,7 +11,7 @@ import { printReceipt, saveReceiptToHistory, getReceiptHistory } from '../lib/pr
 import { useDebounce } from '../hooks/useDebounce';
 import { SaleTypeSelector } from '../components/SaleTypeSelector';
 import { createDelivery } from '../lib/enterprise';
-import type { Product, Customer, CartItem, SaleType } from '../lib/types';
+import type { Product, Customer, CartItem, SaleType, CustomerSource } from '../lib/types';
 import type { PaymentAccount } from '../lib/settings-types';
 import { PaymentMethod, PaymentTiming } from '../types/payment';
 
@@ -37,15 +37,19 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [paymentTiming, setPaymentTiming] = useState<PaymentTiming>('immediate');
-  const [deliveryFeeType, setDeliveryFeeType] = useState<'none' | 'optional' | 'from_cbd'>('none');
-  const deliveryFee = deliveryFeeType === 'optional' ? 100 : deliveryFeeType === 'from_cbd' ? 300 : 0;
+  const [deliveryType, setDeliveryType] = useState<'none' | 'to_cbd' | 'from_cbd_300' | 'from_cbd_500'>('none');
+  const deliveryFee = deliveryType === 'to_cbd' ? 100 : deliveryType === 'from_cbd_300' ? 300 : deliveryType === 'from_cbd_500' ? 500 : 0;
+  const [paymentAccountChoice, setPaymentAccountChoice] = useState<'KCB' | 'NCBA' | 'CASH' | 'MPESA'>('CASH');
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
   const [paymentAccountId, setPaymentAccountId] = useState<string | null>(null);
   const selectedPaymentAccount = paymentAccounts.find((account) => account.id === paymentAccountId) ?? null;
   const [amountPaid, setAmountPaid] = useState('');
   const [showCheckout, setShowCheckout] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
+  const checkoutSessionIdRef = useRef(generateId());
   const [showNewCustomer, setShowNewCustomer] = useState(false);
-  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', email: '' });
+  const [newCustomer, setNewCustomer] = useState<{ name: string; phone: string; email: string; customer_source: CustomerSource }>({ name: '', phone: '', email: '', customer_source: 'WALK_IN' });
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [newProduct, setNewProduct] = useState({ name: '', price: '', stock: '', category: '' });
   const [parkedSales, setParkedSales] = useState<Array<{id: string; cart: CartItem[]; customer: Customer | null; timestamp: string}>>([]);
@@ -278,6 +282,11 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
     // Reset sale type
     setSaleType('standard');
     setDepositAmount(0);
+    // Reset delivery and payment account
+    setDeliveryType('none');
+    setPaymentAccountChoice('CASH');
+    // Refresh checkout session ID for the next transaction
+    checkoutSessionIdRef.current = generateId();
   };
 
   // Handle KCB BUNI STK Push
@@ -388,10 +397,15 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
       mpesaReceipt,
       paymentAccountId,
       paymentAccountName: paymentAccounts.find((account) => account.id === paymentAccountId)?.name ?? null,
+      idempotencyKey: checkoutSessionIdRef.current,
+      deliveryType,
+      deliveryFee,
+      discount: 0,
+      paymentAccount: paymentAccountChoice === 'CASH' ? 'MPESA' : paymentAccountChoice,
     });
 
     if (result.success) {
-      await logSaleCompleted(result.transactionId, { cart, total_amount: cartTotal }, user?.id);
+      await logSaleCompleted(result.transactionId, { cart, total_amount: cartTotal, delivery_fee: deliveryFee }, user?.id);
 
       // Brief delay to show success, then close
       setTimeout(() => {
@@ -401,7 +415,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
     }
 
     return result;
-  }, [cart, cartTotal, products, selectedCustomer, user?.id]);
+  }, [cart, cartTotal, products, selectedCustomer, user?.id, paymentAccountId, paymentAccounts, deliveryType, deliveryFee, paymentAccountChoice]);
 
   const parkSale = () => {
     if (cart.length === 0) return;
@@ -488,6 +502,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
       name: sanitizedName,
       phone: newCustomer.phone ? sanitizeInput(newCustomer.phone) : undefined,
       email: newCustomer.email ? sanitizeInput(newCustomer.email) : undefined,
+      customer_source: newCustomer.customer_source || 'WALK_IN',
       loyalty_points: 0,
       total_spent: 0,
       created_at: new Date().toISOString(),
@@ -500,134 +515,151 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
     await logCustomerCreated(customer.id, customer, user?.id);
     setCustomers(prev => [...prev, customer]);
     setSelectedCustomer(customer);
-    setNewCustomer({ name: '', phone: '', email: '' });
+    setNewCustomer({ name: '', phone: '', email: '', customer_source: 'WALK_IN' });
     setShowNewCustomer(false);
     toast.show('Customer created successfully!');
   }, [newCustomer, user?.id, toast]);
 
   const handleCheckout = useCallback(async () => {
-    if (cart.length === 0) return;
+    if (cart.length === 0 || isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
 
-    // Dropshipping is supplier-fulfilled, so local stock is not reserved at checkout.
-    if (saleType !== 'dropshipping') {
-      for (const item of cart) {
-      const product = products.find(p => p.id === item.product_id);
-      if (!product) continue;
-      if (product.stock < item.quantity) {
-        toast.show(`Insufficient stock for ${item.product_name}. Available: ${product.stock}`, 'error');
-        return;
-      }
-      }
-    }
-
-    // Prevent checkout with pending providers
-    if (paymentMethod === 'ncba') {
-      toast.show('NCBA payment gateway is currently pending activation. Please choose Physical Cash or KCB BUNI STK.', 'error');
-      return;
-    }
-
-    // Calculate amount paid based on payment timing and sale type
-    let paid = paymentTiming === 'cod' ? 0 : (parseFloat(amountPaid) || cartTotal);
-    let amountRequired = paymentTiming === 'cod' ? 0 : cartTotal;
-    
-    // For Lipa Mdogo and Kyama, only deposit is required today
-    if (saleType === 'lipa_mdogo' || saleType === 'kyama') {
-      amountRequired = depositAmount;
-      paid = Math.min(parseFloat(amountPaid) || depositAmount, cartTotal);
-    }
-    
-    if (paid < amountRequired && paymentTiming !== 'cod') {
-      const requiredLabel = (saleType === 'lipa_mdogo' || saleType === 'kyama') 
-        ? 'deposit amount' 
-        : 'total amount due';
-      toast.show(`Amount paid is less than ${requiredLabel}`, 'error');
-      return;
-    }
-
-    const result = await completeSale({
-      cart,
-      cartTotal,
-      products,
-      selectedCustomer,
-      paymentMethod,
-      paymentTiming,
-      amountPaid: paid,
-      change: (saleType === 'lipa_mdogo' || saleType === 'kyama' || paymentTiming === 'cod') ? 0 : change,
-      userId: user?.id || 'system',
-      paymentAccountId,
-      paymentAccountName: paymentAccounts.find((account) => account.id === paymentAccountId)?.name ?? null,
-      saleType,
-      depositAmount: (saleType === 'lipa_mdogo' || saleType === 'kyama') ? depositAmount : 0,
-      balanceAmount: (saleType === 'lipa_mdogo' || saleType === 'kyama') ? (cartTotal - depositAmount) : paymentTiming === 'cod' ? cartTotal : 0,
-    });
-
-    if (result.success) {
-      await logSaleCompleted(result.transactionId, { cart, total_amount: cartTotal, product_total: productTotal, delivery_fee: deliveryFee }, user?.id);
-      if (paymentTiming === 'cod') {
-        await createDelivery(result.transactionId, {
-          customer_id: selectedCustomer?.id,
-          delivery_fee: deliveryFee,
-          delivery_fee_paid: deliveryFee,
-          delivery_fee_status: deliveryFee > 0 ? 'paid' : 'waived',
-          delivery_payment_method: deliveryFee > 0 ? (paymentMethod === 'cash' ? 'cash' : 'kcb_buni') : undefined,
-          cod_amount: cartTotal,
-          cod_collected: 0,
-          cod_status: 'pending',
-          status: 'pending',
-          notes: `Delivery fee: ${deliveryFeeType === 'optional' ? 'Optional/Others Delivery Fee (CBD)' : deliveryFeeType === 'from_cbd' ? 'Delivery from CBD' : 'No delivery fee'}`,
-        });
-        onDeliveryRequested?.(result.transactionId);
-      }
-      
-      // Automatically print receipt after successful sale
-      try {
-        const transaction = await getTransaction(result.transactionId);
-        if (transaction) {
-          const [business, receipt] = await Promise.all([
-            getBusinessSettings(),
-            getReceiptSettings(),
-          ]);
-          
-          if (business && receipt && transaction) {
-            const receiptData = {
-              id: transaction.id,
-              items: transaction.items,
-              total_amount: transaction.total_amount,
-              amount_paid: transaction.amount_paid,
-              change_amount: transaction.change_amount,
-              payment_method: transaction.payment_method,
-              payment_account_id: transaction.payment_account_id,
-              payment_account_name: transaction.payment_account_name || selectedPaymentAccount?.name,
-              payment_account_number: selectedPaymentAccount?.account_number || selectedPaymentAccount?.account_number_masked,
-              payment_account_paybill: selectedPaymentAccount?.paybill_number,
-              created_at: transaction.created_at,
-              customer_name: selectedCustomer?.name,
-              customer_phone: selectedCustomer?.phone,
-              cashier_name: user?.full_name || user?.username,
-              mpesa_receipt: kcbReceiptNumber || undefined,
-            };
-            
-            // Print receipt
-            printReceipt({
-              business,
-              receipt,
-              transaction: receiptData,
-            });
-            
-            // Save to history for reprinting
-            saveReceiptToHistory(receiptData);
-            setLastTransactionId(result.transactionId);
+    try {
+      // Dropshipping is supplier-fulfilled, so local stock is not reserved at checkout.
+      if (saleType !== 'dropshipping') {
+        for (const item of cart) {
+          const product = products.find(p => p.id === item.product_id);
+          if (!product) continue;
+          if (product.stock < item.quantity) {
+            toast.show(`Insufficient stock for ${item.product_name}. Available: ${product.stock}`, 'error');
+            return;
           }
         }
-      } catch (error) {
-        console.error('[v0] Error printing receipt:', error);
+      }
+
+      // Prevent checkout with pending providers
+      if (paymentMethod === 'ncba') {
+        toast.show('NCBA payment gateway is currently pending activation. Please choose Physical Cash or KCB BUNI STK.', 'error');
+        return;
+      }
+
+      // Calculate amount paid based on payment timing and sale type
+      let paid = paymentTiming === 'cod' ? 0 : (parseFloat(amountPaid) || cartTotal);
+      let amountRequired = paymentTiming === 'cod' ? 0 : cartTotal;
+      
+      // For Lipa Mdogo and Kyama, only deposit is required today
+      if (saleType === 'lipa_mdogo' || saleType === 'kyama') {
+        amountRequired = depositAmount;
+        paid = Math.min(parseFloat(amountPaid) || depositAmount, cartTotal);
       }
       
-      clearCart();
-      await loadData();
-      toast.show('Transaction completed successfully!');
+      if (paid < amountRequired && paymentTiming !== 'cod') {
+        const requiredLabel = (saleType === 'lipa_mdogo' || saleType === 'kyama') 
+          ? 'deposit amount' 
+          : 'total amount due';
+        toast.show(`Amount paid is less than ${requiredLabel}`, 'error');
+        return;
+      }
+
+      const result = await completeSale({
+        cart,
+        cartTotal,
+        products,
+        selectedCustomer,
+        paymentMethod,
+        paymentTiming,
+        amountPaid: paid,
+        change: (saleType === 'lipa_mdogo' || saleType === 'kyama' || paymentTiming === 'cod') ? 0 : change,
+        userId: user?.id || 'system',
+        paymentAccountId,
+        paymentAccountName: paymentAccounts.find((account) => account.id === paymentAccountId)?.name ?? null,
+        saleType,
+        depositAmount: (saleType === 'lipa_mdogo' || saleType === 'kyama') ? depositAmount : 0,
+        balanceAmount: (saleType === 'lipa_mdogo' || saleType === 'kyama') ? (cartTotal - depositAmount) : paymentTiming === 'cod' ? cartTotal : 0,
+        idempotencyKey: checkoutSessionIdRef.current,
+        deliveryType,
+        deliveryFee,
+        discount: 0,
+        paymentAccount: paymentAccountChoice,
+      });
+
+      if (result.success) {
+        await logSaleCompleted(result.transactionId, { cart, total_amount: cartTotal, product_total: productTotal, delivery_fee: deliveryFee }, user?.id);
+        if (paymentTiming === 'cod') {
+          await createDelivery(result.transactionId, {
+            customer_id: selectedCustomer?.id,
+            delivery_fee: deliveryFee,
+            delivery_fee_paid: deliveryFee,
+            delivery_fee_status: deliveryFee > 0 ? 'paid' : 'waived',
+            delivery_payment_method: deliveryFee > 0 ? (paymentMethod === 'cash' ? 'cash' : 'kcb_buni') : undefined,
+            cod_amount: cartTotal,
+            cod_collected: 0,
+            cod_status: 'pending',
+            status: 'pending',
+            notes: `Delivery fee: ${deliveryType === 'to_cbd' ? 'Delivery Fee to CBD (KES 100)' : deliveryType === 'from_cbd_300' ? 'Delivery Fee from CBD (KES 300)' : deliveryType === 'from_cbd_500' ? 'Delivery Fee from CBD (KES 500)' : 'No delivery fee'}`,
+          });
+          onDeliveryRequested?.(result.transactionId);
+        }
+        
+        // Automatically print receipt after successful sale
+        try {
+          const transaction = await getTransaction(result.transactionId);
+          if (transaction) {
+            const [business, receipt] = await Promise.all([
+              getBusinessSettings(),
+              getReceiptSettings(),
+            ]);
+            
+            if (business && receipt && transaction) {
+              const receiptData = {
+                id: transaction.id,
+                items: transaction.items,
+                total_amount: transaction.total_amount,
+                amount_paid: transaction.amount_paid,
+                change_amount: transaction.change_amount,
+                payment_method: transaction.payment_method,
+                payment_account: transaction.payment_account || paymentAccountChoice,
+                delivery_type: transaction.delivery_type || deliveryType,
+                delivery_fee: transaction.delivery_fee !== undefined ? transaction.delivery_fee : deliveryFee,
+                subtotal: productTotal,
+                discount: 0,
+                payment_account_id: transaction.payment_account_id,
+                payment_account_name: transaction.payment_account_name || selectedPaymentAccount?.name,
+                payment_account_number: selectedPaymentAccount?.account_number || selectedPaymentAccount?.account_number_masked,
+                payment_account_paybill: selectedPaymentAccount?.paybill_number,
+                created_at: transaction.created_at,
+                customer_name: selectedCustomer?.name,
+                customer_phone: selectedCustomer?.phone,
+                cashier_name: user?.full_name || user?.username,
+                mpesa_receipt: kcbReceiptNumber || undefined,
+              };
+              
+              // Print receipt
+              printReceipt({
+                business,
+                receipt,
+                transaction: receiptData,
+              });
+              
+              // Save to history for reprinting
+              saveReceiptToHistory(receiptData);
+              setLastTransactionId(result.transactionId);
+            }
+          }
+        } catch (error) {
+          console.error('[v0] Error printing receipt:', error);
+        }
+        
+        clearCart();
+        await loadData();
+        toast.show('Transaction completed successfully!');
+      }
+    } finally {
+      isSubmittingRef.current = false;
+      setIsSubmitting(false);
     }
-  }, [cart, cartTotal, productTotal, deliveryFee, deliveryFeeType, products, selectedCustomer, paymentMethod, amountPaid, change, user?.id, toast, onDeliveryRequested, paymentAccounts, paymentAccountId, saleType, depositAmount, kcbReceiptNumber]);
+  }, [cart, cartTotal, productTotal, deliveryFee, deliveryType, paymentAccountChoice, products, selectedCustomer, paymentMethod, amountPaid, change, user?.id, toast, onDeliveryRequested, paymentAccounts, paymentAccountId, saleType, depositAmount, kcbReceiptNumber]);
 
   return (
     <div className="grid grid-cols-3 gap-6 h-full">
@@ -954,7 +986,12 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
                       <button
                         key={id}
                         type="button"
-                        onClick={() => setPaymentMethod(id)}
+                        onClick={() => {
+                          setPaymentMethod(id);
+                          if (id === 'cash') setPaymentAccountChoice('CASH');
+                          else if (id === 'kcb_buni') setPaymentAccountChoice('MPESA');
+                          else if (id === 'ncba') setPaymentAccountChoice('NCBA');
+                        }}
                         disabled={isLocked}
                         className={`p-3 rounded-lg border-2 flex flex-col items-center gap-1 transition relative ${
                           paymentMethod === id
@@ -993,16 +1030,56 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
                 </div>
               )}
 
-              <div className="rounded-lg border border-slate-700 bg-slate-700/50 p-4">
-                <label className="mb-2 block text-sm text-slate-300">Delivery fee (tracked separately)</label>
-                <select value={deliveryFeeType} onChange={(event) => setDeliveryFeeType(event.target.value as typeof deliveryFeeType)} className="w-full rounded-lg border border-slate-600 bg-slate-600 px-3 py-2 text-white">
-                  <option value="none">No delivery fee</option>
-                  <option value="optional">Optional/Others Delivery Fee — KES 100</option>
-                  <option value="from_cbd">Delivery from CBD — KES 300</option>
-                </select>
-                <div className="mt-3 flex justify-between text-sm"><span className="text-slate-400">Products</span><span className="text-white">KES {productTotal.toLocaleString()}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-slate-400">Delivery fee</span><span className="text-amber-300">KES {deliveryFee.toLocaleString()}</span></div>
-                <div className="mt-2 flex justify-between border-t border-slate-600 pt-2 font-semibold"><span className="text-slate-200">Total</span><span className="text-emerald-300">KES {cartTotal.toLocaleString()}</span></div>
+              {/* Payment Account Selection */}
+              <div>
+                <label className="text-sm text-slate-400 block mb-2 font-medium">Payment Account</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {(['CASH', 'MPESA', 'KCB', 'NCBA'] as const).map((acc) => (
+                    <button
+                      key={acc}
+                      type="button"
+                      onClick={() => {
+                        setPaymentAccountChoice(acc);
+                        if (acc === 'CASH') setPaymentMethod('cash');
+                        else if (acc === 'MPESA' || acc === 'KCB') setPaymentMethod('kcb_buni');
+                        else if (acc === 'NCBA') setPaymentMethod('ncba');
+                      }}
+                      className={`py-2 px-3 rounded-lg border text-xs sm:text-sm font-semibold transition text-center ${
+                        paymentAccountChoice === acc
+                          ? 'border-blue-500 bg-blue-600/20 text-blue-300 ring-1 ring-blue-500'
+                          : 'border-slate-600 text-slate-400 hover:border-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      {acc}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Delivery Fee Selection */}
+              <div>
+                <label className="text-sm text-slate-400 block mb-2 font-medium">Delivery Fee</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[
+                    { id: 'none' as const, label: 'No Delivery — KES 0', amount: 0 },
+                    { id: 'to_cbd' as const, label: 'Delivery Fee to CBD — KES 100', amount: 100 },
+                    { id: 'from_cbd_300' as const, label: 'Delivery Fee from CBD — KES 300', amount: 300 },
+                    { id: 'from_cbd_500' as const, label: 'Delivery Fee from CBD — KES 500', amount: 500 },
+                  ].map(({ id, label, amount }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setDeliveryType(id)}
+                      className={`p-2.5 rounded-lg border text-left flex justify-between items-center transition ${
+                        deliveryType === id
+                          ? 'border-emerald-500 bg-emerald-600/20 text-white ring-1 ring-emerald-500'
+                          : 'border-slate-600 bg-slate-700/50 text-slate-300 hover:border-slate-500'
+                      }`}
+                    >
+                      <span className="text-xs sm:text-sm font-medium">{label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* KCB BUNI STK Push Section */}
@@ -1297,17 +1374,38 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
 
                   {/* Summary */}
                   <div className="bg-slate-700 rounded-lg p-4 space-y-2">
+                    <div className="flex justify-between text-slate-400 text-sm">
+                      <span>Product Subtotal</span>
+                      <span className="text-white">KES {productTotal.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-400 text-sm">
+                      <span>Discount</span>
+                      <span className="text-white">KES 0</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className={deliveryFee > 0 ? "text-amber-300 font-medium" : "text-slate-400"}>
+                        Delivery Fee ({deliveryType === 'to_cbd' ? 'to CBD' : deliveryType === 'from_cbd_300' ? 'from CBD 300' : deliveryType === 'from_cbd_500' ? 'from CBD 500' : 'None'})
+                      </span>
+                      <span className={deliveryFee > 0 ? "text-amber-300 font-semibold" : "text-slate-400"}>
+                        KES {deliveryFee.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-blue-300 font-medium">Payment Account</span>
+                      <span className="text-blue-300 font-semibold">{paymentAccountChoice}</span>
+                    </div>
+                    <div className="flex justify-between text-base font-semibold border-t border-slate-600 pt-2">
+                      <span className="text-slate-200">Total Due</span>
+                      <span className="text-emerald-300">KES {cartTotal.toLocaleString()}</span>
+                    </div>
+
                     {saleType === 'lipa_mdogo' || saleType === 'kyama' ? (
                       <>
-                        <div className="flex justify-between text-slate-400">
-                          <span>Total Amount</span>
-                          <span>KES {cartTotal.toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between text-emerald-400">
+                        <div className="flex justify-between text-emerald-400 text-sm">
                           <span>Deposit Today</span>
                           <span>KES {depositAmount.toLocaleString()}</span>
                         </div>
-                        <div className="flex justify-between text-slate-400">
+                        <div className="flex justify-between text-slate-400 text-sm">
                           <span>Received</span>
                           <span>KES {(parseFloat(amountPaid) || 0).toLocaleString()}</span>
                         </div>
@@ -1318,11 +1416,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
                       </>
                     ) : (
                       <>
-                        <div className="flex justify-between text-slate-400">
-                          <span>Total</span>
-                          <span>KES {cartTotal.toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between text-slate-400">
+                        <div className="flex justify-between text-slate-400 text-sm">
                           <span>Paid</span>
                           <span>KES {(parseFloat(amountPaid) || 0).toLocaleString()}</span>
                         </div>
@@ -1337,9 +1431,17 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
                   {/* Complete Button */}
                   <button
                     onClick={handleCheckout}
-                    className="w-full py-4 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 transition"
+                    disabled={isSubmitting || (paymentTiming !== 'cod' && paymentMethod === 'ncba')}
+                    className="w-full py-4 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Complete Sale
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 size={20} className="animate-spin" />
+                        <span>Processing Sale...</span>
+                      </>
+                    ) : (
+                      'Complete Sale'
+                    )}
                   </button>
                 </>
               )}
@@ -1386,6 +1488,21 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
                   onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })}
                   className="w-full px-4 py-3 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-emerald-500 focus:outline-none"
                 />
+              </div>
+              <div>
+                <label className="text-sm text-slate-400 block mb-2">Acquisition Channel / Source</label>
+                <select
+                  value={newCustomer.customer_source}
+                  onChange={(e) => setNewCustomer({ ...newCustomer, customer_source: e.target.value as CustomerSource })}
+                  className="w-full px-4 py-3 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-emerald-500 focus:outline-none"
+                >
+                  <option value="WALK_IN">Walk-in</option>
+                  <option value="WHATSAPP">WhatsApp</option>
+                  <option value="FACEBOOK">Facebook</option>
+                  <option value="INSTAGRAM">Instagram</option>
+                  <option value="REFERRAL">Referral</option>
+                  <option value="OTHER">Other</option>
+                </select>
               </div>
 
               <button

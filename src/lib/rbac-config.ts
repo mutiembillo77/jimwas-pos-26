@@ -77,6 +77,12 @@ export const ROUTE_CONFIG: Record<string, RouteConfig> = {
     permissions: ['reports.view', 'finance.view'],
     description: 'Executive Dashboard',
   },
+  'analytics': {
+    path: '/analytics',
+    allowedRoles: ['admin', 'manager'],
+    permissions: ['reports.view', 'finance.view'],
+    description: 'Analytics, Fast-Moving Products & Customer Intelligence',
+  },
 
   // Enterprise operations
   'reports': {

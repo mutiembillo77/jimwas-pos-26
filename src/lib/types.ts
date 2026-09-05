@@ -1,8 +1,11 @@
+export type CustomerSource = 'FACEBOOK' | 'WHATSAPP' | 'INSTAGRAM' | 'WALK_IN' | 'REFERRAL' | 'OTHER' | 'UNKNOWN';
+
 export interface Customer {
   id: string;
   name: string;
   phone?: string;
   email?: string;
+  customer_source?: CustomerSource;
   loyalty_points: number;
   total_spent: number;
   created_at: string;
@@ -99,6 +102,12 @@ export interface Transaction {
   customer_phone?: string;
   cashier_name?: string;
   mpesa_receipt?: string;
+  idempotency_key?: string;
+  payment_account?: string;
+  delivery_type?: string;
+  delivery_fee?: number;
+  discount?: number;
+  subtotal?: number;
 }
 
 export interface InstallmentPlan {
@@ -531,3 +540,74 @@ export interface MonthEndSalesSummary {
   daily_rows: DailySalesRow[];
 }
 
+export interface FastMovingProduct {
+  product_id: string;
+  product_name: string;
+  category: string;
+  units_sold: number;
+  revenue: number;
+  transaction_count: number;
+  velocity_period_days: number; // units_sold / total period days
+  velocity_active_days: number; // units_sold / active selling days
+  rank_by_units: number;
+  rank_by_revenue: number;
+  sales_share: number; // percentage of merchandise subtotal
+}
+
+export interface ProductCategoryPerformance {
+  category: string;
+  units_sold: number;
+  revenue: number;
+  transaction_count: number;
+  sales_share: number; // percentage of merchandise subtotal
+}
+
+export interface CustomerIntelligenceSummary {
+  total_customers: number;
+  unique_customers: number;
+  new_customers: number;
+  returning_customers: number;
+  repeat_customers: number;
+  repeat_purchase_rate: number; // percentage (repeat_customers / unique_customers * 100)
+  average_customer_spend: number;
+  purchase_frequency: number; // completed transactions / unique customers
+  top_customers: Array<{
+    customer_id: string;
+    customer_name: string;
+    customer_phone?: string;
+    customer_source?: CustomerSource;
+    transaction_count: number;
+    total_spent: number;
+  }>;
+}
+
+export interface CustomerSourceSummary {
+  source: CustomerSource;
+  label: string;
+  customer_count: number;
+  transaction_count: number;
+  sales: number;
+  sales_share: number; // percentage of total sales
+}
+
+export interface AuthoritativeAnalyticsSummary {
+  period: {
+    start: string;
+    end: string;
+    total_days: number;
+  };
+  kpis: {
+    total_sales: number;
+    merchandise_subtotal: number;
+    total_discounts: number;
+    total_delivery_fees: number;
+    completed_transactions: number;
+    average_transaction_value: number;
+    total_paid: number;
+    unique_customers: number;
+  };
+  fast_moving_products: FastMovingProduct[];
+  category_performance: ProductCategoryPerformance[];
+  customer_intelligence: CustomerIntelligenceSummary;
+  customer_sources: CustomerSourceSummary[];
+}
