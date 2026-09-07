@@ -421,12 +421,20 @@ async function processSyncItem(item: { table_name: string; operation: string; da
         const result = await table.upsert(sanitizedTx, { onConflict: 'id', ignoreDuplicates: false });
         error = result.error;
         if (!error && rawItems.length > 0) {
-          const sanitizedItems = rawItems.map((it: Record<string, unknown>) => ({
-            ...sanitizeForSupabase('transaction_items', it),
-            transaction_id: sanitizedTx.id || data.id,
-          }));
+          const sanitizedItems = rawItems.map((it: Record<string, unknown>, idx: number) => {
+            const rawId = String(it.id || `${sanitizedTx.id || data.id}-item-${idx}`);
+            const validId = isValidUUID(rawId) ? rawId : deterministicUUID(rawId);
+            return {
+              ...sanitizeForSupabase('transaction_items', it),
+              id: validId,
+              transaction_id: sanitizedTx.id || data.id,
+            };
+          });
           const itemsResult = await client.from('transaction_items').upsert(sanitizedItems, { onConflict: 'id', ignoreDuplicates: false });
-          if (itemsResult.error) console.warn('[Sync] Failed to sync transaction items:', itemsResult.error);
+          if (itemsResult.error) {
+            console.warn('[Sync] Failed to sync transaction items in queue:', itemsResult.error);
+            error = itemsResult.error;
+          }
         }
       } else {
         const sanitized = sanitizeForSupabase(table_name, data);
@@ -504,6 +512,45 @@ const TABLE_CONFIGS: TableSyncConfig[] = [
   { table: 'safe_drops', store: 'safe_drops', orderBy: 'created_at', limit: 500 },
 ];
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function isValidUUID(id: string): boolean {
+  return UUID_REGEX.test(id);
+}
+
+export function deterministicUUID(seed: string): string {
+  let h1 = 0xdeadbeef, h2 = 0x41c64e6d, h3 = 0x12345678, h4 = 0x87654321;
+  for (let i = 0; i < seed.length; i++) {
+    const ch = seed.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+    h3 = Math.imul(h3 ^ ch, 3812015801);
+    h4 = Math.imul(h4 ^ ch, 2718281829);
+  }
+  const hex = (n: number) => (n >>> 0).toString(16).padStart(8, '0');
+  const raw = hex(h1) + hex(h2) + hex(h3) + hex(h4);
+  return `${raw.substring(0, 8)}-${raw.substring(8, 12)}-4${raw.substring(13, 16)}-a${raw.substring(17, 20)}-${raw.substring(20, 32)}`;
+}
+
+export function mergeRelationalItems(localItems?: unknown[], remoteItems?: unknown[]): unknown[] {
+  const local = Array.isArray(localItems) ? (localItems as Record<string, unknown>[]) : [];
+  const remote = Array.isArray(remoteItems) ? (remoteItems as Record<string, unknown>[]) : [];
+
+  if (remote.length === 0) return local;
+  if (local.length === 0) return remote;
+
+  // Deduplicate by item id or product_id key
+  const map = new Map<string, Record<string, unknown>>();
+  for (const it of local) {
+    const key = String(it.id || `${it.product_id}-${it.unit_price}-${it.quantity}`);
+    map.set(key, it);
+  }
+  for (const it of remote) {
+    const key = String(it.id || `${it.product_id}-${it.unit_price}-${it.quantity}`);
+    map.set(key, it);
+  }
+  return Array.from(map.values());
+}
+
 async function syncTableFromRemote(client: SupabaseClient, db: Awaited<ReturnType<typeof getDB>>, config: TableSyncConfig) {
   let query = client.from(config.table).select(
     config.relation ? `*, ${config.relation.table}(*)` : '*'
@@ -548,11 +595,35 @@ async function syncTableFromRemote(client: SupabaseClient, db: Awaited<ReturnTyp
       }
     }
 
+    const existing = await db.get(config.store, row.id as never);
+    let existingItems = (existing as Record<string, unknown> | undefined)?.items;
+    if ((!Array.isArray(existingItems) || existingItems.length === 0) && config.store === 'transactions') {
+      const idbChildItems = await db.getAllFromIndex('transaction_items', 'by-transaction', row.id as never).catch(() => []);
+      if (Array.isArray(idbChildItems) && idbChildItems.length > 0) {
+        existingItems = idbChildItems;
+      }
+    }
+    const remoteItems = row[config.relation ? config.relation.field : ''];
+    const mergedItems = config.relation
+      ? mergeRelationalItems(Array.isArray(existingItems) ? existingItems : [], Array.isArray(remoteItems) ? remoteItems : [])
+      : [];
+
     const record = config.relation
-      ? { ...row, sync_status: 'synced', items: (row[config.relation.field] as unknown[]) || [] }
+      ? { ...row, sync_status: 'synced', items: mergedItems }
       : { ...row, sync_status: 'synced' };
 
     await db.put(config.store, record as never);
+    if (config.store === 'transactions' && Array.isArray(mergedItems) && mergedItems.length > 0) {
+      for (const item of mergedItems) {
+        const it = item as Record<string, unknown>;
+        if (it && it.id) {
+          await db.put('transaction_items', {
+            ...it,
+            transaction_id: row.id,
+          } as never).catch(() => {});
+        }
+      }
+    }
   }
 }
 
@@ -577,10 +648,26 @@ async function handleRealtimeChange(payload: { table: string; eventType: string;
           if (!error && data) {
             const db = await getDB();
             const row = (data as unknown) as Record<string, unknown>;
+            const existing = await db.get('transactions', txId);
+            let existingItems = (existing as Record<string, unknown> | undefined)?.items;
+            if (!Array.isArray(existingItems) || existingItems.length === 0) {
+              try {
+                const idbChildItems = await db.getAllFromIndex('transaction_items', 'by-transaction', txId as never);
+                if (Array.isArray(idbChildItems) && idbChildItems.length > 0) {
+                  existingItems = idbChildItems;
+                }
+              } catch { /* db may not support getAllFromIndex in all environments */ }
+            }
+            const remoteItems = row['transaction_items'];
+            const mergedItems = mergeRelationalItems(
+              Array.isArray(existingItems) ? existingItems : [],
+              Array.isArray(remoteItems) ? remoteItems : []
+            );
+
             const fullRecord = {
               ...row,
               sync_status: 'synced',
-              items: (row['transaction_items'] as unknown[]) || [],
+              items: mergedItems,
             };
             await db.put('transactions', fullRecord as never);
             notifyDataUpdated('transactions', eventType, fullRecord);
@@ -613,10 +700,26 @@ async function handleRealtimeChange(payload: { table: string; eventType: string;
               .maybeSingle();
             if (!error && data) {
               const row = (data as unknown) as Record<string, unknown>;
+              const existing = await db.get(config.store, record.id as never);
+              let existingItems = (existing as Record<string, unknown> | undefined)?.items;
+              if ((!Array.isArray(existingItems) || existingItems.length === 0) && config.store === 'transactions') {
+                try {
+                  const idbChildItems = await db.getAllFromIndex('transaction_items', 'by-transaction', record.id as never);
+                  if (Array.isArray(idbChildItems) && idbChildItems.length > 0) {
+                    existingItems = idbChildItems;
+                  }
+                } catch { /* db may not support getAllFromIndex in all environments */ }
+              }
+              const remoteItems = row[config.relation.field];
+              const mergedItems = mergeRelationalItems(
+                Array.isArray(existingItems) ? existingItems : [],
+                Array.isArray(remoteItems) ? remoteItems : []
+              );
+
               const fullRecord = {
                 ...row,
                 sync_status: 'synced',
-                items: (row[config.relation.field] as unknown[]) || [],
+                items: mergedItems,
               };
               await db.put(config.store, fullRecord as never);
               notifyDataUpdated(table, eventType, fullRecord);
@@ -625,7 +728,15 @@ async function handleRealtimeChange(payload: { table: string; eventType: string;
           }
           // Preserve existing local items if relational query could not be completed
           const existing = await db.get(config.store, record.id as never);
-          const existingItems = (existing as Record<string, unknown> | undefined)?.items;
+          let existingItems = (existing as Record<string, unknown> | undefined)?.items;
+          if ((!Array.isArray(existingItems) || existingItems.length === 0) && config.store === 'transactions') {
+            try {
+              const idbChildItems = await db.getAllFromIndex('transaction_items', 'by-transaction', record.id as never);
+              if (Array.isArray(idbChildItems) && idbChildItems.length > 0) {
+                existingItems = idbChildItems;
+              }
+            } catch { /* db may not support getAllFromIndex in all environments */ }
+          }
           const fallbackRecord = {
             ...record,
             sync_status: 'synced',
@@ -793,10 +904,15 @@ export async function syncInsertTransaction(transaction: unknown, items: unknown
   const rawTx = transaction as Record<string, unknown>;
   const sanitizedTx = sanitizeForSupabase('transactions', rawTx);
   const rawItems = Array.isArray(items) ? items : (Array.isArray(rawTx.items) ? rawTx.items : []);
-  const sanitizedItems = rawItems.map((it: Record<string, unknown>) => ({
-    ...sanitizeForSupabase('transaction_items', it),
-    transaction_id: sanitizedTx.id || rawTx.id,
-  }));
+  const sanitizedItems = rawItems.map((it: Record<string, unknown>, idx: number) => {
+    const rawId = String(it.id || `${sanitizedTx.id || rawTx.id}-item-${idx}`);
+    const validId = isValidUUID(rawId) ? rawId : deterministicUUID(rawId);
+    return {
+      ...sanitizeForSupabase('transaction_items', it),
+      id: validId,
+      transaction_id: sanitizedTx.id || rawTx.id,
+    };
+  });
 
   if (!isOnline || !getSupabase()) {
     queueForSync('transactions', 'insert', rawTx);
@@ -810,7 +926,8 @@ export async function syncInsertTransaction(transaction: unknown, items: unknown
       const { error: itemsError } = await getSupabase()!.from('transaction_items').upsert(sanitizedItems, { onConflict: 'id', ignoreDuplicates: false });
       if (itemsError) throw itemsError;
     }
-  } catch {
+  } catch (err) {
+    console.warn('[Sync] Failed to insert transaction or items to Supabase, queueing for background retry:', err);
     queueForSync('transactions', 'insert', rawTx);
     rawItems.forEach(item => queueForSync('transaction_items', 'insert', item));
   }
@@ -864,12 +981,6 @@ export const syncUpdateMpesaSettings = syncUpdateKCBSettings;
 export const syncUpdatePaymentMethod = (method: unknown) => syncUpdate('payment_methods', method);
 export const syncUpdateLoyaltySettings = (settings: unknown) => syncUpdate('loyalty_settings', settings);
 export const syncUpdateReceiptSettings = (settings: unknown) => syncUpdate('receipt_settings', settings);
-
-// Helper to check if ID is a valid UUID
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function isValidUUID(id: string): boolean {
-  return UUID_REGEX.test(id);
-}
 
 // Generate a proper UUID v4
 function generateUUID(): string {

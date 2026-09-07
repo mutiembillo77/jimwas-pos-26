@@ -488,7 +488,8 @@ export function buildReceiptHtml(options: PrintOptions): string {
   }
 
   lines.push('');
-  lines.push('Thank You For Shopping With Us');
+  lines.push('Thanks for Shopping with us');
+  lines.push('Good once sold NOT RETURNABLE/REFUNDABLE');
   lines.push('');
   lines.push(doubleDivider);
 

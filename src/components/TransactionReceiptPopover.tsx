@@ -204,8 +204,9 @@ export function TransactionReceiptPopover({ transaction, customer, position }: T
       </div>
 
       {/* Footer message */}
-      <div className="mt-2 text-center text-[10px] text-slate-500 font-mono">
-        ★ Thank you for shopping with us! ★
+      <div className="mt-2 text-center text-[10px] text-slate-400 font-mono leading-tight space-y-0.5">
+        <div>Thanks for Shopping with us</div>
+        <div className="font-semibold text-slate-400">Good once sold NOT RETURNABLE/REFUNDABLE</div>
       </div>
     </div>
   );

@@ -806,16 +806,112 @@ export async function deleteProduct(id: string) {
 export async function saveTransaction(transaction: POSDatabase['transactions']['value']) {
   const db = await getDB();
   await db.put('transactions', transaction);
+  if (Array.isArray(transaction.items) && transaction.items.length > 0) {
+    await Promise.all(
+      transaction.items.map(async (item) => {
+        if (!item || !item.id) {
+          throw new Error(`Invalid transaction item for transaction ${transaction.id}: item must have an id`);
+        }
+        await db.put('transaction_items', {
+          ...item,
+          transaction_id: transaction.id,
+        });
+      })
+    );
+  }
+}
+
+async function hydrateTransactionItems(
+  tx: POSDatabase['transactions']['value'],
+  db: Awaited<ReturnType<typeof getDB>>,
+  allItemsCache?: POSDatabase['transaction_items']['value'][] | null,
+  allMovementsCache?: POSDatabase['stock_movements']['value'][] | null,
+  productsCache?: POSDatabase['products']['value'][] | null
+): Promise<POSDatabase['transactions']['value']> {
+  if (Array.isArray(tx.items) && tx.items.length > 0) {
+    (tx as any).item_integrity_status = 'verified';
+    return tx;
+  }
+
+  // Level 1: Try to find actual matching items from transaction_items store
+  try {
+    const items = allItemsCache
+      ? allItemsCache.filter((it) => it.transaction_id === tx.id)
+      : await db.getAllFromIndex('transaction_items', 'by-transaction', tx.id).catch(() => []);
+    if (items && items.length > 0) {
+      tx.items = items;
+      (tx as any).item_integrity_status = 'verified';
+      void db.put('transactions', tx).catch(() => {});
+      return tx;
+    }
+  } catch {}
+
+  // Level 2: Authoritative local recovery from stock movements + product catalog
+  try {
+    const movements = allMovementsCache
+      ? allMovementsCache.filter((sm) => sm.reference_id === tx.id || sm.note?.includes(tx.id))
+      : await db.getAllFromIndex('stock_movements', 'by-reference', tx.id).catch(() => []);
+    if (movements && movements.length > 0) {
+      const prods = productsCache ?? (await db.getAll('products').catch(() => []));
+      const reconstructed = movements.map((sm, idx) => {
+        const prod = prods.find((p) => p.id === sm.product_id);
+        const qty = Math.abs(sm.qty_delta) || 1;
+        const price = prod?.price ?? 0;
+        return {
+          id: `${tx.id}-item-${idx}`,
+          transaction_id: tx.id,
+          product_id: sm.product_id,
+          product_name: prod?.name || 'Item',
+          quantity: qty,
+          unit_price: price,
+          subtotal: price * qty,
+        };
+      });
+      if (reconstructed.length > 0) {
+        tx.items = reconstructed;
+        (tx as any).item_integrity_status = 'recovered';
+        void db.put('transactions', tx).catch(() => {});
+        return tx;
+      }
+    }
+  } catch {}
+
+  // Level 3: No genuine line-item evidence exists.
+  // CRITICAL: A financial POS must NEVER fabricate synthetic product items.
+  // Preserve transaction exactly as recorded with items = [] and mark integrity status as missing.
+  tx.items = [];
+  (tx as any).item_integrity_status = 'missing';
+
+  return tx;
 }
 
 export async function getTransaction(id: string) {
   const db = await getDB();
-  return db.get('transactions', id);
+  const tx = await db.get('transactions', id);
+  if (!tx) return undefined;
+  return hydrateTransactionItems(tx, db);
 }
 
 export async function getAllTransactions() {
   const db = await getDB();
-  return db.getAll('transactions');
+  const txs = await db.getAll('transactions');
+
+  const needsHydration = txs.some((tx) => !tx.items || tx.items.length === 0);
+  if (!needsHydration) return txs;
+
+  const [allItems, allMovements, allProducts] = await Promise.all([
+    db.getAll('transaction_items').catch(() => []),
+    db.getAll('stock_movements').catch(() => []),
+    db.getAll('products').catch(() => []),
+  ]);
+
+  for (let i = 0; i < txs.length; i++) {
+    if (!txs[i].items || txs[i].items.length === 0) {
+      await hydrateTransactionItems(txs[i], db, allItems, allMovements, allProducts);
+    }
+  }
+
+  return txs;
 }
 
 // Installment plan operations
