@@ -1,5 +1,5 @@
 import { generateId, getProduct, getTransaction, saveProduct, saveTransaction, saveLoyaltyTransaction, saveStockMovement, saveCustomer } from './db';
-import { syncInsertTransaction, syncUpdateProduct, syncInsertStockMovement, syncUpdateCustomer, syncInsertLoyaltyTransaction } from './sync';
+import { syncInsertTransaction, syncUpdateProduct, syncInsertStockMovement, syncUpdateCustomer, syncInsertLoyaltyTransaction, deterministicUUID, isValidUUID } from './sync';
 import type { Product, Customer, CartItem, SaleType } from './types';
 import { PaymentMethod, PaymentTiming, isValidPaymentMethod } from '../types/payment';
 import { ACTIVE_FINANCIAL_ENV, type FinancialEnvironment } from './environment';
@@ -128,16 +128,24 @@ export async function completeSale({
       'CASH'
     );
 
-    // Build transaction items with deterministic IDs
-    const items = cart.map((item, index) => ({
-      id: `${txId}-item-${item.product_id || index}`,
-      transaction_id: txId,
-      product_id: item.product_id,
-      product_name: item.product_name,
-      quantity: item.quantity,
-      unit_price: item.unit_price,
-      subtotal: item.subtotal,
-    }));
+    // Build transaction items with canonical deterministic UUIDs.
+    // deterministicUUID(seed) produces the same UUID that syncInsertTransaction sends to
+    // Supabase, so local IndexedDB IDs and remote Supabase IDs are always identical.
+    // This eliminates the local/remote ID mismatch that previously caused items to be
+    // duplicated in mergeRelationalItems on every pull from the server.
+    const items = cart.map((item, index) => {
+      const rawId = `${txId}-item-${item.product_id || index}`;
+      const canonicalId = isValidUUID(rawId) ? rawId : deterministicUUID(rawId);
+      return {
+        id: canonicalId,
+        transaction_id: txId,
+        product_id: item.product_id,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        subtotal: item.subtotal,
+      };
+    });
 
     // Create transaction record
     const transaction = {

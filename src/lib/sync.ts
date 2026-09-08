@@ -384,6 +384,15 @@ const TABLE_ALLOWED_COLUMNS: Record<string, string[]> = {
     'id', 'plan_id', 'amount', 'payment_method', 'notes',
     'created_at', 'sync_status', 'local_id'
   ],
+  period_reconciliations: [
+    'id', 'report_period', 'business_date', 'historical_figure',
+    'pos_recovered_amount', 'pos_transaction_count', 'difference',
+    'source_availability', 'reconciliation_status', 'evidence_strength',
+    'decision', 'accepted_amount', 'evidence_type', 'evidence_notes',
+    'rationale', 'reviewer_id', 'reviewer_name', 'reviewer_role',
+    'approval_status', 'approval_timestamp', 'created_at', 'updated_at',
+    'sync_status'
+  ],
 };
 
 export function sanitizeForSupabase(table: string, data: Record<string, unknown>): Record<string, unknown> {
@@ -505,6 +514,7 @@ const TABLE_CONFIGS: TableSyncConfig[] = [
   { table: 'expense_categories', store: 'expense_categories' },
   { table: 'shifts', store: 'shifts', orderBy: 'opened_at', limit: 500 },
   { table: 'reconciliations', store: 'reconciliations', orderBy: 'created_at', limit: 1000 },
+  { table: 'period_reconciliations', store: 'period_reconciliations', orderBy: 'updated_at', limit: 1000 },
   { table: 'outbound_deliveries', store: 'outbound_deliveries', orderBy: 'updated_at', limit: 1000 },
   { table: 'offers', store: 'offers' },
   { table: 'supplier_fulfillments', store: 'supplier_fulfillments', orderBy: 'created_at', limit: 1000 },
@@ -538,7 +548,8 @@ export function mergeRelationalItems(localItems?: unknown[], remoteItems?: unkno
   if (remote.length === 0) return local;
   if (local.length === 0) return remote;
 
-  // Deduplicate by item id or product_id key
+  // Primary deduplication pass: merge by item id.
+  // Remote items win on conflict (they carry the authoritative UUID from Supabase).
   const map = new Map<string, Record<string, unknown>>();
   for (const it of local) {
     const key = String(it.id || `${it.product_id}-${it.unit_price}-${it.quantity}`);
@@ -548,7 +559,50 @@ export function mergeRelationalItems(localItems?: unknown[], remoteItems?: unkno
     const key = String(it.id || `${it.product_id}-${it.unit_price}-${it.quantity}`);
     map.set(key, it);
   }
-  return Array.from(map.values());
+  const merged = Array.from(map.values());
+
+  // Secondary deduplication pass: remove any legacy non-UUID local items that represent
+  // the same (transaction_id, product_id) pair as a UUID item (from Supabase).
+  // This handles transactions created before the deterministicUUID fix, where the local
+  // item ID was a composite string (e.g. "txId-item-productId") that did not match the
+  // UUID written to Supabase, so both copies survived the primary pass above.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  // Group all items by (transaction_id|product_id)
+  const groups = new Map<string, Record<string, unknown>[]>();
+  const ungrouped: Record<string, unknown>[] = [];
+  for (const it of merged) {
+    const txId = String(it.transaction_id || '');
+    const prodId = String(it.product_id || '');
+    if (!txId || !prodId) {
+      ungrouped.push(it);
+      continue;
+    }
+    const key = `${txId}|${prodId}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(it);
+  }
+
+  const result: Record<string, unknown>[] = [...ungrouped];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      result.push(group[0]);
+      continue;
+    }
+    // Multiple items for the same (tx, product). Check if any are non-UUID (legacy IDs).
+    const uuidItems = group.filter(it => UUID_RE.test(String(it.id || '')));
+    const nonUuidItems = group.filter(it => !UUID_RE.test(String(it.id || '')));
+    if (uuidItems.length > 0 && nonUuidItems.length > 0) {
+      // Non-UUID items are legacy duplicates of the UUID items — evict them.
+      result.push(...uuidItems);
+    } else {
+      // All same type (all UUIDs = real multi-line items, or all non-UUID = offline).
+      // Keep them all.
+      result.push(...group);
+    }
+  }
+
+  return result;
 }
 
 async function syncTableFromRemote(client: SupabaseClient, db: Awaited<ReturnType<typeof getDB>>, config: TableSyncConfig) {
@@ -963,6 +1017,8 @@ export const syncInsertShift = (shift: unknown) => syncInsert('shifts', shift);
 export const syncUpdateShift = (shift: unknown) => syncUpdate('shifts', shift);
 export const syncInsertReconciliation = (record: unknown) => syncInsert('reconciliations', record);
 export const syncUpdateReconciliation = (record: unknown) => syncUpdate('reconciliations', record);
+export const syncInsertPeriodReconciliation = (record: unknown) => syncInsert('period_reconciliations', record);
+export const syncUpdatePeriodReconciliation = (record: unknown) => syncUpdate('period_reconciliations', record);
 export const syncInsertOutboundDelivery = (delivery: unknown) => syncInsert('outbound_deliveries', delivery);
 export const syncUpdateOutboundDelivery = (delivery: unknown) => syncUpdate('outbound_deliveries', delivery);
 export const syncInsertOffer = (offer: unknown) => syncInsert('offers', offer);
