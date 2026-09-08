@@ -204,8 +204,10 @@ export async function completeSale({
           await syncUpdateProduct(updated);
 
           const noteSuffix = mpesaReceipt ? ` - MPESA:${mpesaReceipt}` : '';
+          const rawMovementId = `${txId}-sm-${product.id}`;
+          const canonicalMovementId = isValidUUID(rawMovementId) ? rawMovementId : deterministicUUID(rawMovementId);
           const movement = {
-            id: `${txId}-sm-${product.id}`,
+            id: canonicalMovementId,
             product_id: product.id,
             qty_delta: -item.quantity,
             reason: 'sale' as const,

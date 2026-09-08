@@ -409,13 +409,19 @@ export function sanitizeForSupabase(table: string, data: Record<string, unknown>
       clean[col] = data[col];
     }
   }
-  if (table === 'stock_movements' && clean.reference_type === 'sale') {
-    clean.reference_type = 'transaction';
+  if (table === 'stock_movements') {
+    if (clean.reference_type === 'sale') {
+      clean.reference_type = 'transaction';
+    }
+    if (clean.id) {
+      const rawId = String(clean.id);
+      clean.id = isValidUUID(rawId) ? rawId : deterministicUUID(rawId);
+    }
   }
   return clean;
 }
 
-async function processSyncItem(item: { table_name: string; operation: string; data: Record<string, unknown> }) {
+export async function processSyncItem(item: { table_name: string; operation: string; data: Record<string, unknown> }) {
   const client = getSupabase();
   if (!client) throw new Error('Supabase is not configured. Sync is unavailable while offline.');
   const { table_name, operation, data } = item;
@@ -445,6 +451,13 @@ async function processSyncItem(item: { table_name: string; operation: string; da
             error = itemsResult.error;
           }
         }
+      } else if (table_name === 'stock_movements') {
+        const rawId = String(data.id || '');
+        const validId = isValidUUID(rawId) ? rawId : deterministicUUID(rawId);
+        const movementData = { ...data, id: validId };
+        const sanitized = sanitizeForSupabase(table_name, movementData);
+        const result = await table.upsert(sanitized, { onConflict: 'id', ignoreDuplicates: false });
+        error = result.error;
       } else {
         const sanitized = sanitizeForSupabase(table_name, data);
         const result = await table.upsert(sanitized, { onConflict: 'id', ignoreDuplicates: false });
@@ -456,6 +469,13 @@ async function processSyncItem(item: { table_name: string; operation: string; da
       if (table_name === 'transactions') {
         const sanitizedTx = sanitizeForSupabase('transactions', data);
         const result = await table.upsert(sanitizedTx, { onConflict: 'id', ignoreDuplicates: false });
+        error = result.error;
+      } else if (table_name === 'stock_movements') {
+        const rawId = String(data.id || '');
+        const validId = isValidUUID(rawId) ? rawId : deterministicUUID(rawId);
+        const movementData = { ...data, id: validId };
+        const sanitized = sanitizeForSupabase(table_name, movementData);
+        const result = await table.upsert(sanitized, { onConflict: 'id', ignoreDuplicates: false });
         error = result.error;
       } else {
         const sanitized = sanitizeForSupabase(table_name, data);
@@ -923,30 +943,46 @@ export function queueForSync(tableName: string, operation: 'insert' | 'update' |
 
 // Generic sync helpers
 async function syncInsert(table: string, data: unknown): Promise<void> {
-  const sanitized = sanitizeForSupabase(table, data as Record<string, unknown>);
+  let record = data as Record<string, unknown>;
+  if (table === 'stock_movements' && record?.id) {
+    const rawId = String(record.id);
+    const validId = isValidUUID(rawId) ? rawId : deterministicUUID(rawId);
+    if (validId !== rawId) {
+      record = { ...record, id: validId };
+    }
+  }
+  const sanitized = sanitizeForSupabase(table, record);
   if (!isOnline || !getSupabase()) {
-    queueForSync(table, 'insert', data);
+    queueForSync(table, 'insert', record);
     return;
   }
   try {
     const { error } = await getSupabase()!.from(table).insert(sanitized);
     if (error) throw error;
   } catch {
-    queueForSync(table, 'insert', data);
+    queueForSync(table, 'insert', record);
   }
 }
 
 async function syncUpdate(table: string, data: unknown): Promise<void> {
-  const sanitized = sanitizeForSupabase(table, data as Record<string, unknown>);
+  let record = data as Record<string, unknown>;
+  if (table === 'stock_movements' && record?.id) {
+    const rawId = String(record.id);
+    const validId = isValidUUID(rawId) ? rawId : deterministicUUID(rawId);
+    if (validId !== rawId) {
+      record = { ...record, id: validId };
+    }
+  }
+  const sanitized = sanitizeForSupabase(table, record);
   if (!isOnline || !getSupabase()) {
-    queueForSync(table, 'update', data);
+    queueForSync(table, 'update', record);
     return;
   }
   try {
     const { error } = await getSupabase()!.from(table).upsert(sanitized, { onConflict: 'id' });
     if (error) throw error;
   } catch {
-    queueForSync(table, 'update', data);
+    queueForSync(table, 'update', record);
   }
 }
 
