@@ -1188,6 +1188,11 @@ export async function getAllRoles(): Promise<Role[]> {
   return db.getAll('roles');
 }
 
+export async function deleteRole(id: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('roles', id);
+}
+
 // Permission operations
 export async function savePermission(permission: Permission) {
   const db = await getDB();

@@ -1,6 +1,6 @@
 // Security Seed Data - Initialize default roles, permissions, and admin user
 
-import { generateId, saveRole, savePermission, saveUser, getRoleByCode, getUserByUsername, getAllRoles, getAllPermissions, getDB } from './db';
+import { generateId, saveRole, deleteRole, savePermission, saveUser, getRoleByCode, getUserByUsername, getAllRoles, getAllUsers, getAllPermissions, getDB } from './db';
 import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS, type Role, type Permission, type User, type RoleCode } from './security-types';
 
 // Simple password hashing (same as auth.ts)
@@ -28,6 +28,63 @@ export function initializeSecurityData(): Promise<void> {
   return securityInitializationPromise;
 }
 
+/**
+ * Normalizes system roles to deterministic canonical IDs (role-admin, role-manager, role-cashier).
+ * Migrates any legacy users pointing to random UUID roles before deleting obsolete legacy records.
+ * Idempotent, referentially safe, and duplicate-safe.
+ */
+export async function normalizeSystemRolesAndUsers(): Promise<void> {
+  const now = new Date().toISOString();
+  const roleData: Array<{ code: RoleCode; name: string; description: string }> = [
+    { code: 'admin', name: 'System Administrator', description: 'Full system access with all permissions' },
+    { code: 'manager', name: 'Manager', description: 'Store manager with sales, inventory, and approval permissions' },
+    { code: 'cashier', name: 'Cashier', description: 'Cashier with basic sales and customer permissions' },
+  ];
+
+  const existingRoles = await getAllRoles();
+  const allUsers = await getAllUsers();
+
+  for (const rd of roleData) {
+    const canonicalId = `role-${rd.code}`;
+    const canonicalRole = existingRoles.find(r => r.id === canonicalId);
+
+    // 1. Ensure canonical role exists with deterministic ID
+    if (!canonicalRole) {
+      const newRole: Role = {
+        id: canonicalId,
+        code: rd.code,
+        name: rd.name,
+        description: rd.description,
+        permissions: DEFAULT_ROLE_PERMISSIONS[rd.code],
+        is_system: true,
+        created_at: now,
+        updated_at: now,
+        sync_status: 'synced',
+      };
+      await saveRole(newRole);
+    }
+
+    // 2. Identify any legacy roles with non-canonical IDs for this role code
+    const legacyRoles = existingRoles.filter(r => r.code === rd.code && r.id !== canonicalId);
+    const legacyRoleIds = new Set(legacyRoles.map(r => r.id));
+
+    // 3. Referentially safe migration of all users referencing this role
+    for (const user of allUsers) {
+      if ((user.role_code === rd.code && user.role_id !== canonicalId) || legacyRoleIds.has(user.role_id)) {
+        user.role_id = canonicalId;
+        user.role_code = rd.code;
+        user.updated_at = now;
+        await saveUser(user);
+      }
+    }
+
+    // 4. Safely delete obsolete legacy roles after users are migrated
+    for (const legacyRole of legacyRoles) {
+      await deleteRole(legacyRole.id);
+    }
+  }
+}
+
 async function initializeSecurityDataOnce(): Promise<void> {
   console.log('Checking security initialization...');
 
@@ -47,31 +104,8 @@ async function initializeSecurityDataOnce(): Promise<void> {
     }
   }
 
-  // Initialize roles and add any newly introduced system role.
-  const existingRoles = await getAllRoles();
-  const now = new Date().toISOString();
-  const roleData: Array<{ code: RoleCode; name: string; description: string }> = [
-    { code: 'admin', name: 'System Administrator', description: 'Full system access with all permissions' },
-    { code: 'manager', name: 'Manager', description: 'Store manager with sales, inventory, and approval permissions' },
-    { code: 'cashier', name: 'Cashier', description: 'Cashier with basic sales and customer permissions' },
-  ];
-
-  for (const rd of roleData) {
-    if (!existingRoles.some(role => role.code === rd.code)) {
-      const role: Role = {
-        id: generateId(),
-        code: rd.code,
-        name: rd.name,
-        description: rd.description,
-        permissions: DEFAULT_ROLE_PERMISSIONS[rd.code],
-        is_system: true,
-        created_at: now,
-        updated_at: now,
-        sync_status: 'synced',
-      };
-      await saveRole(role);
-    }
-  }
+  // Canonical role seeding & legacy normalization
+  await normalizeSystemRolesAndUsers();
 
   // Create default admin user (only if not exists)
   const existingAdmin = await getUserByUsername('admin');

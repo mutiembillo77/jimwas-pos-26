@@ -1,7 +1,7 @@
 // Permission Service for RBAC - Permission checks and authorization
 
-import { getUser, getRole, getAllRoles, getAllPermissions } from './db';
-import type { Role, RoleCode } from './security-types';
+import { getUser, getRole, getRoleByCode, getAllRoles, getAllPermissions } from './db';
+import { DEFAULT_ROLE_PERMISSIONS, PERMISSIONS, type Role, type RoleCode } from './security-types';
 
 // Cache for user permissions (in-memory cache for performance)
 const permissionCache = new Map<string, Set<string>>();
@@ -24,22 +24,47 @@ export async function getUserPermissions(userId: string): Promise<Set<string>> {
   const user = await getUser(userId);
   if (!user) return new Set();
 
-  const role = await getRole(user.role_id);
-  if (!role) return new Set();
+  // 1. Primary lookup by user.role_id
+  let role = user.role_id ? await getRole(user.role_id) : undefined;
 
-  // Get permission names from role's permission IDs
-  const allPermissions = await getAllPermissions();
-  const permMap = new Map(allPermissions.map(p => [p.id, p.name]));
-
-  const permissionNames = new Set<string>();
-  for (const permId of role.permissions) {
-    const permName = permMap.get(permId);
-    if (permName) permissionNames.add(permName);
+  // 2. Defensive fallback by user.role_code
+  if (!role && user.role_code) {
+    role = await getRoleByCode(user.role_code);
   }
 
-  // Cache the result
-  permissionCache.set(userId, permissionNames);
-  return permissionNames;
+  // If role is found in database/IndexedDB, extract permissions
+  if (role && Array.isArray(role.permissions)) {
+    const allPermissions = await getAllPermissions();
+    const permMap = new Map(allPermissions.map(p => [p.id, p.name]));
+
+    const permissionNames = new Set<string>();
+    for (const permId of role.permissions) {
+      const permName = permMap.get(permId) || PERMISSIONS.find(p => p.id === permId)?.name;
+      if (permName) permissionNames.add(permName);
+    }
+
+    permissionCache.set(userId, permissionNames);
+    return permissionNames;
+  }
+
+  // 3. Final offline defense: recognized DEFAULT_ROLE_PERMISSIONS entry only for validated system role codes
+  if (user.role_code && user.role_code in DEFAULT_ROLE_PERMISSIONS) {
+    const defaultPermIds = DEFAULT_ROLE_PERMISSIONS[user.role_code as RoleCode];
+    const allPermissions = await getAllPermissions();
+    const permMap = new Map(allPermissions.map(p => [p.id, p.name]));
+
+    const permissionNames = new Set<string>();
+    for (const permId of defaultPermIds) {
+      const permName = permMap.get(permId) || PERMISSIONS.find(p => p.id === permId)?.name;
+      if (permName) permissionNames.add(permName);
+    }
+
+    permissionCache.set(userId, permissionNames);
+    return permissionNames;
+  }
+
+  // 4. Fail closed for unknown or missing role
+  return new Set();
 }
 
 // Check if user has a specific permission
@@ -77,20 +102,39 @@ export async function getRoles(): Promise<Role[]> {
 
 // Get role by code
 export async function getRolePermissions(roleCode: RoleCode): Promise<Set<string>> {
-  const roles = await getAllRoles();
-  const role = roles.find(r => r.code === roleCode);
-  if (!role) return new Set();
-
-  const allPermissions = await getAllPermissions();
-  const permMap = new Map(allPermissions.map(p => [p.id, p.name]));
-
-  const permissionNames = new Set<string>();
-  for (const permId of role.permissions) {
-    const permName = permMap.get(permId);
-    if (permName) permissionNames.add(permName);
+  let role = await getRoleByCode(roleCode);
+  if (!role) {
+    const roles = await getAllRoles();
+    role = roles.find(r => r.code === roleCode);
   }
 
-  return permissionNames;
+  if (role && Array.isArray(role.permissions)) {
+    const allPermissions = await getAllPermissions();
+    const permMap = new Map(allPermissions.map(p => [p.id, p.name]));
+
+    const permissionNames = new Set<string>();
+    for (const permId of role.permissions) {
+      const permName = permMap.get(permId) || PERMISSIONS.find(p => p.id === permId)?.name;
+      if (permName) permissionNames.add(permName);
+    }
+    return permissionNames;
+  }
+
+  // Fallback to recognized DEFAULT_ROLE_PERMISSIONS
+  if (roleCode && roleCode in DEFAULT_ROLE_PERMISSIONS) {
+    const defaultPermIds = DEFAULT_ROLE_PERMISSIONS[roleCode];
+    const allPermissions = await getAllPermissions();
+    const permMap = new Map(allPermissions.map(p => [p.id, p.name]));
+
+    const permissionNames = new Set<string>();
+    for (const permId of defaultPermIds) {
+      const permName = permMap.get(permId) || PERMISSIONS.find(p => p.id === permId)?.name;
+      if (permName) permissionNames.add(permName);
+    }
+    return permissionNames;
+  }
+
+  return new Set();
 }
 
 // Check if role has permission
@@ -119,9 +163,12 @@ export async function canPerformWithoutApproval(
     return { canPerform: false, requiresApproval: false, error: 'User not found' };
   }
 
-  // Get user's role
-  const role = await getRole(user.role_id);
-  if (!role) {
+  // Get user's role: 1. primary role_id lookup, 2. role_code fallback
+  let role = user.role_id ? await getRole(user.role_id) : undefined;
+  if (!role && user.role_code) {
+    role = await getRoleByCode(user.role_code);
+  }
+  if (!role && !(user.role_code && user.role_code in DEFAULT_ROLE_PERMISSIONS)) {
     return { canPerform: false, requiresApproval: false, error: 'Role not found' };
   }
 
