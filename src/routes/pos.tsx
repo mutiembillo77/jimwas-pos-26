@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Plus, Minus, Trash2, Search, User, ShoppingCart, Banknote, Smartphone, Landmark, X, Package, Archive, ArchiveRestore, Loader2, CheckCircle2, XCircle, AlertCircle, Clock, FlaskConical, Zap, Printer } from 'lucide-react';
-import { generateId, saveProduct, getAllProducts, getAllCustomers, saveCustomer, getKCBSettings, getBusinessSettings, getReceiptSettings, getTransaction, getAllPaymentAccounts } from '../lib/db';
+import { generateId, saveProduct, getAllProducts, getAllCustomers, saveCustomer, getKCBSettings, getBusinessSettings, getReceiptSettings, getTransaction, getAllPaymentAccounts, getAllUsers } from '../lib/db';
 import { syncInsertCustomer, syncInsertProduct, getSupabase, getOnlineStatus, subscribeToDataChanges } from '../lib/sync';
 import { logSaleCompleted, logCustomerCreated } from '../lib/audit';
 import { useAuth } from '../context/AuthContext';
@@ -12,6 +12,7 @@ import { useDebounce } from '../hooks/useDebounce';
 import { SaleTypeSelector } from '../components/SaleTypeSelector';
 import { createDelivery } from '../lib/enterprise';
 import type { Product, Customer, CartItem, SaleType, CustomerSource } from '../lib/types';
+import type { User } from '../lib/security-types';
 import type { PaymentAccount } from '../lib/settings-types';
 import { PaymentMethod, PaymentTiming } from '../types/payment';
 
@@ -37,11 +38,15 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [paymentTiming, setPaymentTiming] = useState<PaymentTiming>('immediate');
-  const [deliveryType, setDeliveryType] = useState<'none' | 'to_cbd' | 'from_cbd_300' | 'from_cbd_500'>('none');
-  const deliveryFee = deliveryType === 'to_cbd' ? 100 : deliveryType === 'from_cbd_300' ? 300 : deliveryType === 'from_cbd_500' ? 500 : 0;
+  const [deliveryType, setDeliveryType] = useState<'none' | 'to_cbd' | 'from_cbd_300' | 'from_cbd_400' | 'from_cbd_500'>('none');
+  const deliveryFee = deliveryType === 'to_cbd' ? 100 : deliveryType === 'from_cbd_300' ? 300 : deliveryType === 'from_cbd_400' ? 400 : deliveryType === 'from_cbd_500' ? 500 : 0;
   const [paymentAccountChoice, setPaymentAccountChoice] = useState<'KCB' | 'NCBA' | 'CASH' | 'MPESA'>('CASH');
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
   const [paymentAccountId, setPaymentAccountId] = useState<string | null>(null);
+  // Served By — staff member who handled this customer at checkout
+  const [staffUsers, setStaffUsers] = useState<User[]>([]);
+  const [servedById, setServedById] = useState<string>('');
+  const [servedByName, setServedByName] = useState<string>('');
   const selectedPaymentAccount = paymentAccounts.find((account) => account.id === paymentAccountId) ?? null;
   const [amountPaid, setAmountPaid] = useState('');
   const [showCheckout, setShowCheckout] = useState(false);
@@ -75,6 +80,14 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
 
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(null);
   const [showReceiptHistory, setShowReceiptHistory] = useState(false);
+
+  // Initialize Served By to logged-in user when user context is available
+  useEffect(() => {
+    if (user && !servedById) {
+      setServedById(user.id);
+      setServedByName(user.full_name || user.username || '');
+    }
+  }, [user]);
 
   useEffect(() => {
     loadData();
@@ -117,16 +130,19 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
   }, [kcbStatus, kcbStartTime]);
 
   const loadData = async () => {
-    const [prods, custs, idbMpesa, accounts] = await Promise.all([
+    const [prods, custs, idbMpesa, accounts, allUsers] = await Promise.all([
       getAllProducts(),
       getAllCustomers(),
       getKCBSettings(),
       getAllPaymentAccounts(),
+      getAllUsers(),
     ]);
     setProducts(prods.filter(p => p.is_active));
     setCustomers(custs);
     setPaymentAccounts(accounts);
-    
+    const activeStaff = allUsers.filter(u => u.is_active);
+    setStaffUsers(activeStaff);
+
     if (accounts.length > 0 && !paymentAccountId) setPaymentAccountId(accounts[0].id);
 
     // Always try Supabase first for KCB settings (authoritative source)
@@ -285,6 +301,9 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
     // Reset delivery and payment account
     setDeliveryType('none');
     setPaymentAccountChoice('CASH');
+    // Reset Served By to current logged-in user for next transaction
+    setServedById(user?.id || '');
+    setServedByName(user?.full_name || user?.username || '');
     // Refresh checkout session ID for the next transaction
     checkoutSessionIdRef.current = generateId();
   };
@@ -402,6 +421,8 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
       deliveryFee,
       discount: 0,
       paymentAccount: paymentAccountChoice === 'CASH' ? 'MPESA' : paymentAccountChoice,
+      cashierId: servedById || user?.id || 'system',
+      cashierName: servedByName || user?.full_name || user?.username,
     });
 
     if (result.success) {
@@ -415,7 +436,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
     }
 
     return result;
-  }, [cart, cartTotal, products, selectedCustomer, user?.id, paymentAccountId, paymentAccounts, deliveryType, deliveryFee, paymentAccountChoice]);
+  }, [cart, cartTotal, products, selectedCustomer, user?.id, paymentAccountId, paymentAccounts, deliveryType, deliveryFee, paymentAccountChoice, servedById, servedByName]);
 
   const parkSale = () => {
     if (cart.length === 0) return;
@@ -582,6 +603,8 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
         deliveryFee,
         discount: 0,
         paymentAccount: paymentAccountChoice,
+        cashierId: servedById || user?.id || 'system',
+        cashierName: servedByName || user?.full_name || user?.username,
       });
 
       if (result.success) {
@@ -597,7 +620,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
             cod_collected: 0,
             cod_status: 'pending',
             status: 'pending',
-            notes: `Delivery fee: ${deliveryType === 'to_cbd' ? 'Delivery Fee to CBD (KES 100)' : deliveryType === 'from_cbd_300' ? 'Delivery Fee from CBD (KES 300)' : deliveryType === 'from_cbd_500' ? 'Delivery Fee from CBD (KES 500)' : 'No delivery fee'}`,
+            notes: `Delivery fee: ${deliveryType === 'to_cbd' ? 'Delivery Fee to CBD (KES 100)' : deliveryType === 'from_cbd_300' ? 'Delivery Fee from CBD (KES 300)' : deliveryType === 'from_cbd_400' ? 'Delivery Fee from CBD (KES 400)' : deliveryType === 'from_cbd_500' ? 'Delivery Fee from CBD (KES 500)' : 'No delivery fee'}`,
           });
           onDeliveryRequested?.(result.transactionId);
         }
@@ -631,7 +654,8 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
                 created_at: transaction.created_at,
                 customer_name: selectedCustomer?.name,
                 customer_phone: selectedCustomer?.phone,
-                cashier_name: user?.full_name || user?.username,
+                // Use persisted transaction cashier_name (Served By) first; fall back to current user
+                cashier_name: transaction.cashier_name || servedByName || user?.full_name || user?.username,
                 mpesa_receipt: kcbReceiptNumber || undefined,
               };
               
@@ -659,7 +683,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
       isSubmittingRef.current = false;
       setIsSubmitting(false);
     }
-  }, [cart, cartTotal, productTotal, deliveryFee, deliveryType, paymentAccountChoice, products, selectedCustomer, paymentMethod, amountPaid, change, user?.id, toast, onDeliveryRequested, paymentAccounts, paymentAccountId, saleType, depositAmount, kcbReceiptNumber]);
+  }, [cart, cartTotal, productTotal, deliveryFee, deliveryType, paymentAccountChoice, products, selectedCustomer, paymentMethod, amountPaid, change, user?.id, toast, onDeliveryRequested, paymentAccounts, paymentAccountId, saleType, depositAmount, kcbReceiptNumber, servedById, servedByName]);
 
   return (
     <div className="grid grid-cols-3 gap-6 h-full">
@@ -1064,6 +1088,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
                     { id: 'none' as const, label: 'No Delivery — KES 0', amount: 0 },
                     { id: 'to_cbd' as const, label: 'Delivery Fee to CBD — KES 100', amount: 100 },
                     { id: 'from_cbd_300' as const, label: 'Delivery Fee from CBD — KES 300', amount: 300 },
+                    { id: 'from_cbd_400' as const, label: 'Delivery Fee from CBD — KES 400', amount: 400 },
                     { id: 'from_cbd_500' as const, label: 'Delivery Fee from CBD — KES 500', amount: 500 },
                   ].map(({ id, label, amount }) => (
                     <button
@@ -1384,7 +1409,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className={deliveryFee > 0 ? "text-amber-300 font-medium" : "text-slate-400"}>
-                        Delivery Fee ({deliveryType === 'to_cbd' ? 'to CBD' : deliveryType === 'from_cbd_300' ? 'from CBD 300' : deliveryType === 'from_cbd_500' ? 'from CBD 500' : 'None'})
+                        Delivery Fee ({deliveryType === 'to_cbd' ? 'to CBD' : deliveryType === 'from_cbd_300' ? 'from CBD 300' : deliveryType === 'from_cbd_400' ? 'from CBD 400' : deliveryType === 'from_cbd_500' ? 'from CBD 500' : 'None'})
                       </span>
                       <span className={deliveryFee > 0 ? "text-amber-300 font-semibold" : "text-slate-400"}>
                         KES {deliveryFee.toLocaleString()}
@@ -1426,6 +1451,30 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
                         </div>
                       </>
                     )}
+                  </div>
+
+                  {/* Served By Selector */}
+                  <div>
+                    <label className="text-sm text-slate-400 block mb-2 font-medium">Served By</label>
+                    <select
+                      id="served-by-select"
+                      value={servedById}
+                      onChange={(e) => {
+                        const selected = staffUsers.find(u => u.id === e.target.value);
+                        setServedById(e.target.value);
+                        setServedByName(selected ? (selected.full_name || selected.username) : '');
+                      }}
+                      className="w-full px-3 py-2 bg-slate-700 text-white rounded-lg border border-slate-600 focus:border-emerald-500 focus:outline-none text-sm"
+                    >
+                      {staffUsers.length === 0 && (
+                        <option value={user?.id || 'system'}>{user?.full_name || user?.username || 'Current User'}</option>
+                      )}
+                      {staffUsers.map(u => (
+                        <option key={u.id} value={u.id}>
+                          {u.full_name || u.username}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   {/* Complete Button */}

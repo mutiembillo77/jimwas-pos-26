@@ -254,7 +254,7 @@ export function TransactionsPage() {
             created_at: txn.created_at,
             customer_name: transaction.customer_name,
             customer_phone: transaction.phone,
-            cashier_name: user?.full_name || user?.username,
+            cashier_name: txn.cashier_name || user?.full_name || user?.username,
           },
         });
 

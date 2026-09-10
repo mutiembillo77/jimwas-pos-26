@@ -34,20 +34,25 @@ export interface CompleteSaleParams {
   idempotencyKey?: string;
   /** Explicit transaction ID override (aliases idempotencyKey) */
   transactionId?: string;
-  /** Selected delivery type (e.g. none, to_cbd, from_cbd_300, from_cbd_500) */
-  deliveryType?: 'none' | 'to_cbd' | 'from_cbd_300' | 'from_cbd_500' | string;
+  /** Selected delivery type (e.g. none, to_cbd, from_cbd_300, from_cbd_400, from_cbd_500) */
+  deliveryType?: 'none' | 'to_cbd' | 'from_cbd_300' | 'from_cbd_400' | 'from_cbd_500' | string;
   /** Explicit delivery fee amount (defaults according to deliveryType) */
   deliveryFee?: number;
   /** Transaction-level discount */
   discount?: number;
   /** Explicit payment account (KCB, NCBA, CASH, MPESA) */
   paymentAccount?: 'KCB' | 'NCBA' | 'CASH' | 'MPESA' | string;
+  /** ID of the staff member who served the customer (persisted as cashier_id) */
+  cashierId?: string;
+  /** Display name of the staff member who served the customer (persisted as cashier_name) */
+  cashierName?: string;
 }
 
 export const DELIVERY_FEES: Record<string, number> = {
   none: 0,
   to_cbd: 100,
   from_cbd_300: 300,
+  from_cbd_400: 400,
   from_cbd_500: 500,
 };
 
@@ -87,6 +92,8 @@ export async function completeSale({
   deliveryFee,
   discount = 0,
   paymentAccount,
+  cashierId,
+  cashierName,
 }: CompleteSaleParams): Promise<CompleteSaleResult> {
   const previousSale = saleWriteQueue;
   let releaseSale!: () => void;
@@ -176,6 +183,11 @@ export async function completeSale({
       balance_amount: isCod ? cartTotal : balanceAmount,
       cod_status: isCod ? 'PENDING' as const : undefined,
       mpesa_receipt: method === 'kcb_buni' ? mpesaReceipt : undefined,
+      // Served By: the staff member who handled the customer at checkout.
+      // cashierId/cashierName are set from the explicit UI selection; userId is the
+      // authenticated operator and is preserved separately for audit purposes.
+      cashier_id: cashierId || userId || 'system',
+      cashier_name: cashierName || undefined,
       // Immutable environment classifier — stamped at creation from trusted runtime config.
       // Cannot be changed after creation. Prevents sandbox/production data mixing.
       environment,

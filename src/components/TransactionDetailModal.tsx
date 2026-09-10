@@ -43,6 +43,7 @@ export function TransactionDetailModal({ transaction, isOpen, onClose }: Transac
     if (type === 'none') return 'No Delivery';
     if (type === 'to_cbd') return 'Delivery Fee to CBD';
     if (type === 'from_cbd_300' || type === 'from_cbd') return 'Delivery Fee from CBD (KES 300)';
+    if (type === 'from_cbd_400') return 'Delivery Fee from CBD (KES 400)';
     if (type === 'from_cbd_500') return 'Delivery Fee from CBD (KES 500)';
     return type;
   };
