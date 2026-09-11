@@ -203,3 +203,6 @@ export async function createDefaultCashier(branchId?: string): Promise<void> {
   await saveUser(cashierUser);
   console.log('Default cashier user created: cashier / cashier123');
 }
+
+export { ensurePaymentAccounts } from './init';
+

@@ -6,7 +6,54 @@ import {
   DEFAULT_LOYALTY_SETTINGS,
   DEFAULT_RECEIPT_SETTINGS,
   DEFAULT_PAYMENT_ACCOUNTS,
+  type PaymentAccount,
 } from './settings-types';
+
+/**
+ * Idempotently ensures all default payment accounts exist in IndexedDB.
+ * Detects existing records by ID and unique Code, never duplicates, and preserves existing records.
+ */
+export async function ensurePaymentAccounts(): Promise<PaymentAccount[]> {
+  const db = await getDB();
+  const accounts: PaymentAccount[] = [];
+
+  for (const account of DEFAULT_PAYMENT_ACCOUNTS) {
+    const existingById = await db.get('payment_accounts', account.id);
+    let existing = existingById;
+    if (!existing) {
+      try {
+        existing = await db.getFromIndex('payment_accounts', 'by-code', account.code);
+      } catch {
+        // Fallback if index not ready
+      }
+    }
+
+    if (!existing) {
+      await db.put('payment_accounts', account);
+      accounts.push(account);
+      try {
+        const { queueForSync } = await import('./sync');
+        queueForSync('payment_accounts', 'insert', account as unknown as Record<string, unknown>);
+      } catch {
+        // Non-blocking sync queueing
+      }
+    } else {
+      // Preserve existing record. Only backfill paybill/account_number if defined on default and missing on existing
+      if (
+        (account.paybill_number && !existing.paybill_number) ||
+        (account.account_number && !existing.account_number)
+      ) {
+        const merged: PaymentAccount = { ...existing, ...account };
+        await db.put('payment_accounts', merged);
+        accounts.push(merged);
+      } else {
+        accounts.push(existing);
+      }
+    }
+  }
+
+  return accounts;
+}
 
 /**
  * Initialize the application on first run
@@ -22,12 +69,7 @@ export async function initializeApp(): Promise<void> {
     try {
       // Payment accounts must be seeded independently from first-run settings so
       // upgrades and existing installations receive the destinations too.
-      for (const account of DEFAULT_PAYMENT_ACCOUNTS) {
-        const existingAccount = await db.get('payment_accounts', account.id);
-        if (!existingAccount || !existingAccount.paybill_number || !existingAccount.account_number) {
-          await db.put('payment_accounts', account);
-        }
-      }
+      await ensurePaymentAccounts();
 
       // Check if business settings exist
       const existingSettings = await db.get('business_settings', DEFAULT_BUSINESS_SETTINGS.id);
