@@ -1,6 +1,7 @@
 // Approval Workflow Engine - Handle approval requests for high-risk actions
 
-import { generateId, saveApprovalRequest, getApprovalRequest, getApprovalRequestsByStatus, getApprovalRequestsByRequester, saveApprovalHistory, saveVoidRequest, saveRefundRequest, getVoidRequestsByStatus, getRefundRequestsByStatus, getTransaction, getAllProducts, saveProduct, saveTransaction } from './db';
+import { generateId, saveApprovalRequest, getApprovalRequest, getApprovalRequestsByStatus, getApprovalRequestsByRequester, saveApprovalHistory, saveVoidRequest, saveRefundRequest, getVoidRequestsByStatus, getRefundRequestsByStatus, getTransaction, getAllProducts, saveProduct, saveStockMovement, saveTransaction } from './db';
+import { syncInsertStockMovement, syncUpdateProduct, deterministicUUID, isValidUUID } from './sync';
 import { getCurrentUser } from './auth';
 import { canPerformWithoutApproval } from './permissions';
 import { logApprovalRequested, logApprovalApproved, logApprovalRejected, logSaleVoided, logSaleRefunded } from './audit';
@@ -293,6 +294,81 @@ async function executeApprovedAction(request: ApprovalRequest): Promise<void> {
   }
 }
 
+/**
+ * Shared stock-reversal helper — called by both void execution paths.
+ *
+ * For every transaction item:
+ *   - Creates a deterministic, idempotent reversal stock_movement
+ *     (reason='return', qty_delta=+quantity, reference_type='sale' → 'transaction' in Supabase)
+ *   - Restores local product stock in IndexedDB
+ *   - Queues both the movement and the product update for Supabase sync
+ *
+ * Returns { success: false, error } when transaction_items are absent.
+ * The caller MUST NOT mark the transaction voided when this returns failure.
+ */
+async function performVoidStockReversal(
+  transactionId: string,
+  items: Array<{ product_id: string; quantity: number }>,
+  userId: string,
+  now: string,
+): Promise<{ success: boolean; error?: string }> {
+  if (!items || items.length === 0) {
+    return {
+      success: false,
+      error:
+        'Cannot void: transaction has no line items — stock reversal cannot be established. ' +
+        'Verify that transaction_items exist before retrying.',
+    };
+  }
+
+  const products = await getAllProducts();
+  const productMap = new Map(products.map((p) => [p.id, p]));
+
+  for (const item of items) {
+    if (!item.product_id || !item.quantity) continue;
+
+    // Deterministic UUID: identical seed always yields identical ID.
+    // Protects against duplicate reversal movements on retry or double-call.
+    const rawReversalId = `${transactionId}-void-${item.product_id}`;
+    const reversalId = isValidUUID(rawReversalId) ? rawReversalId : deterministicUUID(rawReversalId);
+
+    const product = productMap.get(item.product_id);
+    const currentStock = product?.stock ?? 0;
+    const newStock = currentStock + item.quantity;
+
+    const movement = {
+      id: reversalId,
+      product_id: item.product_id,
+      qty_delta: item.quantity,         // positive — stock returned (IN)
+      reason: 'return' as const,
+      note: `Void ${transactionId}`,
+      balance_after: newStock,
+      // 'sale' is the local convention; sanitizeForSupabase maps it to 'transaction' before upsert.
+      reference_type: 'sale' as const,
+      reference_id: transactionId,
+      created_at: now,
+      created_by: userId || 'system',
+      sync_status: 'pending' as const,
+    };
+
+    await saveStockMovement(movement);
+    syncInsertStockMovement(movement);
+
+    if (product) {
+      const updatedProduct = {
+        ...product,
+        stock: newStock,
+        updated_at: now,
+        sync_status: 'pending' as const,
+      };
+      await saveProduct(updatedProduct);
+      syncUpdateProduct(updatedProduct);
+    }
+  }
+
+  return { success: true };
+}
+
 // Execute a void immediately for an authorized Admin/Administrator.
 export async function voidTransactionDirect(transactionId: string, reason: string, userId: string): Promise<{ success: boolean; error?: string }> {
   let transaction = await getTransaction(transactionId);
@@ -323,12 +399,21 @@ export async function voidTransactionDirect(transactionId: string, reason: strin
   if (!transaction) return { success: false, error: 'Transaction not found' };
   if (transaction.status === 'voided') return { success: false, error: 'Transaction is already voided' };
   if (!reason.trim()) return { success: false, error: 'A reason is required' };
-  const products = await getAllProducts();
-  const productMap = new Map(products.map(product => [product.id, product]));
-  for (const item of (transaction.items || [])) {
-    const product = productMap.get(item.product_id);
-    if (product) await saveProduct({ ...product, stock: product.stock + (item.quantity || 0), updated_at: new Date().toISOString(), sync_status: 'pending' });
+
+  const now = new Date().toISOString();
+
+  // Create stock reversal movements and restore local product stock.
+  // MUST succeed before the transaction is marked voided.
+  const reversalResult = await performVoidStockReversal(
+    transactionId,
+    transaction.items || [],
+    userId,
+    now,
+  );
+  if (!reversalResult.success) {
+    return { success: false, error: reversalResult.error };
   }
+
   await saveTransaction({ ...transaction, status: 'voided', notes: `Voided: ${reason}`, sync_status: 'pending' });
   try {
     const { supabase } = await import('./supabaseClient');
@@ -348,27 +433,24 @@ export async function voidTransactionDirect(transactionId: string, reason: strin
 // Execute void
 async function executeVoid(request: ApprovalRequest, _data?: Record<string, unknown>): Promise<void> {
   const transactionId = request.entity_id;
-  const { getTransaction, saveTransaction, getAllProducts, saveProduct } = await import('./db');
+  const { getTransaction, saveTransaction } = await import('./db');
 
   const transaction = await getTransaction(transactionId);
   if (!transaction || transaction.status === 'voided') return;
 
-  // Get products to restore stock
-  const products = await getAllProducts();
-  const productMap = new Map(products.map(p => [p.id, p]));
+  const now = new Date().toISOString();
 
-  // Restore stock for each item
-  for (const item of (transaction.items || [])) {
-    const product = productMap.get(item.product_id);
-    if (product) {
-      const updatedProduct = {
-        ...product,
-        stock: product.stock + (item.quantity || 0),
-        updated_at: new Date().toISOString(),
-        sync_status: 'pending' as const,
-      };
-      await saveProduct(updatedProduct);
-    }
+  // Create stock reversal movements and restore local product stock.
+  // Logged and queued for sync. If items are missing, abort — do not mark voided.
+  const reversalResult = await performVoidStockReversal(
+    transactionId,
+    transaction.items || [],
+    request.approver_id || 'system',
+    now,
+  );
+  if (!reversalResult.success) {
+    console.error('[executeVoid] Stock reversal failed — aborting void:', reversalResult.error);
+    return;
   }
 
   // Update transaction status
