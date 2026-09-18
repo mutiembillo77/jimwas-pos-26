@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { RoleGuard } from '../context/AuthContext';
-import { Settings, Users, CreditCard, Building, Save, Plus, CreditCard as Edit, Eye, EyeOff, Check, X, Smartphone, ToggleLeft, ToggleRight, Shield, RefreshCw, AlertCircle, Clock, Printer, CheckCircle2, Loader2, Cloud, CloudOff, FlaskConical, Zap } from 'lucide-react';
+import { Settings, Users, CreditCard, Building, Save, Plus, CreditCard as Edit, Eye, EyeOff, Check, X, Smartphone, ToggleLeft, ToggleRight, Shield, RefreshCw, AlertCircle, Clock, Printer, CheckCircle2, Loader2, Cloud, CloudOff, FlaskConical, Zap, UserMinus, UserCheck } from 'lucide-react';
 import {
   BusinessSettings,
   KCBSettings,
@@ -31,7 +31,7 @@ import {
 } from '../lib/db';
 import { getSupabase } from '../lib/sync';
 import { testPrint } from '../lib/print';
-import { changePassword, createUser, resetUserPassword, updateUserRole } from '../lib/auth';
+import { changePassword, createUser, resetUserPassword, updateUserRole, updateUserStatus } from '../lib/auth';
 import type { RoleCode, User } from '../lib/security-types';
 import { getKCBCallbackUrl, KCB_FUNCTION_NAMES, maskKCBPhone } from '../lib/modules/payments/kcb';
 
@@ -97,21 +97,24 @@ export function SettingsPage() {
           loadedMpesa: KCBSettings | undefined,
           loadedPayments: PaymentMethodConfig[] = [],
           loadedLoyalty: LoyaltySettings | undefined,
-          loadedReceipt: ReceiptSettings | undefined;
+          loadedReceipt: ReceiptSettings | undefined,
+          loadedUsers: User[] = [];
 
       if (supabase) {
-        const [biz, mpesa, payments, loyalty, receipt] = await Promise.all([
+        const [biz, mpesa, payments, loyalty, receipt, usersResult] = await Promise.all([
           supabase.from('business_settings').select('*').eq('id', 'business-settings').maybeSingle(),
           supabase.from('kcb_settings').select('*').eq('id', 'kcb-settings').maybeSingle(),
           supabase.from('payment_methods').select('*').order('display_order'),
           supabase.from('loyalty_settings').select('*').eq('id', 'loyalty-settings').maybeSingle(),
           supabase.from('receipt_settings').select('*').eq('id', 'receipt-settings').maybeSingle(),
+          supabase.from('users').select('*').order('created_at'),
         ]);
         loadedBusiness = biz.data ? { ...biz.data, sync_status: 'synced' as const } : undefined;
         loadedMpesa = mpesa.data ? { ...mpesa.data, sync_status: 'synced' as const } : undefined;
         loadedPayments = (payments.data ?? []) as PaymentMethodConfig[];
         loadedLoyalty = loyalty.data ? { ...loyalty.data, sync_status: 'synced' as const } : undefined;
         loadedReceipt = receipt.data ? { ...receipt.data, sync_status: 'synced' as const } : undefined;
+        loadedUsers = (usersResult.data ?? []) as User[];
       }
 
       // Fall back to IDB if Supabase returned nothing
@@ -124,12 +127,13 @@ export function SettingsPage() {
         getAllUsers(),
       ]);
 
-      // Pending local edits are authoritative until they successfully sync. This prevents
-      // a reload from replacing newly entered values with stale cloud/default values.
+      // Pending local edits are authoritative until they successfully sync.
       const finalBusiness = idbBusiness?.sync_status === 'pending' ? idbBusiness : (loadedBusiness ?? idbBusiness);
       const finalKCB = idbMpesa?.sync_status === 'pending' ? idbMpesa : (loadedMpesa ?? idbMpesa);
       const finalLoyalty = idbLoyalty?.sync_status === 'pending' ? idbLoyalty : (loadedLoyalty ?? idbLoyalty);
       const finalReceipt = idbReceipt?.sync_status === 'pending' ? idbReceipt : (loadedReceipt ?? idbReceipt);
+      // Users: Supabase is always authoritative; fall back to IDB only if Supabase returned nothing
+      const finalUsers = loadedUsers.length > 0 ? loadedUsers : idbUsers;
 
       if (finalBusiness) setBusinessSettings(finalBusiness);
       setKCBSettings({ ...DEFAULT_KCB_SETTINGS, ...(finalKCB ?? {}) });
@@ -137,7 +141,7 @@ export function SettingsPage() {
       if (finalPayments.length > 0) setPaymentMethods(finalPayments);
       if (finalLoyalty) setLoyaltySettings(finalLoyalty);
       if (finalReceipt) setReceiptSettings(finalReceipt);
-      setUsers(idbUsers);
+      setUsers(finalUsers);
     } catch (error) {
       console.error('Failed to load settings:', error);
     } finally {
@@ -517,15 +521,118 @@ function UsersTab({
   onEdit: (user: User) => void;
 }) {
   const [showModal, setShowModal] = useState(false);
+  const [actionUser, setActionUser] = useState<User | null>(null);
+  const [actionType, setActionType] = useState<'deactivate' | 'reactivate' | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState('');
 
   const getRoleColor = (role: string) => {
     switch (role) {
-      case 'admin': return 'bg-red-900/30 text-red-400';
-      case 'manager': return 'bg-amber-900/30 text-amber-400';
-      case 'cashier': return 'bg-blue-900/30 text-blue-400';
+      case 'admin': return 'bg-red-900/30 text-red-400 border border-red-700/40';
+      case 'manager': return 'bg-amber-900/30 text-amber-400 border border-amber-700/40';
+      case 'cashier': return 'bg-blue-900/30 text-blue-400 border border-blue-700/40';
       default: return 'bg-slate-700 text-slate-400';
     }
   };
+
+  const handleStatusAction = (u: User, type: 'deactivate' | 'reactivate') => {
+    setActionUser(u);
+    setActionType(type);
+    setActionError('');
+  };
+
+  const confirmStatusAction = async () => {
+    if (!actionUser || !actionType) return;
+    setActionLoading(true);
+    setActionError('');
+    try {
+      const result = await updateUserStatus(actionUser.id, actionType === 'reactivate');
+      if (!result.success) {
+        setActionError(result.error || 'Failed to update user status');
+      } else {
+        setActionUser(null);
+        setActionType(null);
+        onRefresh();
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Unexpected error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const activeUsers = users.filter(u => u.is_active);
+  const inactiveUsers = users.filter(u => !u.is_active);
+
+  const renderUserRow = (u: User) => (
+    <div key={u.id} className={`flex items-center justify-between py-4 px-2 rounded-lg transition ${
+      !u.is_active ? 'opacity-50' : ''
+    }`}>
+      <div className="flex items-center gap-4">
+        <div className={`w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold ${
+          u.is_active ? 'bg-slate-600 text-slate-200' : 'bg-slate-800 text-slate-500'
+        }`}>
+          {(u.full_name || u.username || '?').charAt(0).toUpperCase()}
+        </div>
+        <div>
+          <p className="text-white font-medium">{u.full_name}</p>
+          <p className="text-sm text-slate-400">@{u.username}</p>
+          <p className="text-xs text-slate-500">{u.email}</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 flex-wrap justify-end">
+        <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${getRoleColor(u.role_code)}`}>
+          {u.role_code.charAt(0).toUpperCase() + u.role_code.slice(1)}
+        </span>
+        <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${
+          u.is_active
+            ? 'bg-emerald-900/30 text-emerald-400 border-emerald-700/40'
+            : 'bg-slate-800 text-slate-500 border-slate-700'
+        }`}>
+          {u.is_active ? 'Active' : 'Inactive'}
+        </span>
+        {currentUser?.id !== u.id && (
+          <div className="flex items-center gap-1">
+            {/* Edit role */}
+            <button
+              onClick={() => onEdit(u)}
+              title="Edit user role"
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition"
+            >
+              <Edit size={16} />
+            </button>
+            {/* Deactivate / Reactivate */}
+            {u.is_active ? (
+              <button
+                onClick={() => handleStatusAction(u, 'deactivate')}
+                title="Deactivate user"
+                className="p-2 text-slate-400 hover:text-amber-400 hover:bg-amber-900/20 rounded-lg transition"
+              >
+                <UserMinus size={16} />
+              </button>
+            ) : (
+              <button
+                onClick={() => handleStatusAction(u, 'reactivate')}
+                title="Reactivate user"
+                className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-emerald-900/20 rounded-lg transition"
+              >
+                <UserCheck size={16} />
+              </button>
+            )}
+          </div>
+        )}
+        {currentUser?.id === u.id && (
+          <button
+            onClick={() => onEdit(u)}
+            title="Edit your profile"
+            className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition"
+          >
+            <Edit size={16} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -533,48 +640,88 @@ function UsersTab({
         <h2 className="text-lg font-semibold text-white flex items-center gap-2">
           <Users size={20} />
           User Management
+          <span className="ml-2 text-xs font-normal text-slate-400">{activeUsers.length} active{inactiveUsers.length > 0 ? `, ${inactiveUsers.length} inactive` : ''}</span>
         </h2>
         <button
           onClick={() => setShowModal(true)}
-          className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition flex items-center gap-2"
+          className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition flex items-center gap-2 text-sm"
         >
-          <Plus size={18} />
+          <Plus size={16} />
           Add User
         </button>
       </div>
 
-      <div className="divide-y divide-slate-700">
-        {users.map((u) => (
-          <div key={u.id} className="flex items-center justify-between py-4">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-slate-600 flex items-center justify-center">
-                <Users size={24} className="text-slate-400" />
-              </div>
-              <div>
-                <p className="text-white font-medium">{u.full_name}</p>
-                <p className="text-sm text-slate-400">@{u.username}</p>
-                <p className="text-xs text-slate-500">{u.email}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <span className={`px-3 py-1 rounded-full text-xs ${getRoleColor(u.role_code)}`}>
-                {u.role_code.charAt(0).toUpperCase() + u.role_code.slice(1)}
-              </span>
-              <span className={`px-3 py-1 rounded-full text-xs ${u.is_active ? 'bg-emerald-900/30 text-emerald-400' : 'bg-red-900/30 text-red-400'}`}>
-                {u.is_active ? 'Active' : 'Inactive'}
-              </span>
-              {currentUser?.id !== u.id && (
-                <button
-                  onClick={() => onEdit(u)}
-                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition"
-                >
-                  <Edit size={18} />
-                </button>
+      {/* Active users */}
+      {activeUsers.length > 0 && (
+        <div className="divide-y divide-slate-700/60">
+          {activeUsers.map(renderUserRow)}
+        </div>
+      )}
+
+      {/* Inactive users (collapsed section) */}
+      {inactiveUsers.length > 0 && (
+        <div className="mt-4">
+          <p className="text-xs text-slate-500 uppercase tracking-wider mb-3 font-medium">Inactive / Deactivated</p>
+          <div className="divide-y divide-slate-800 bg-slate-900/40 rounded-lg px-3">
+            {inactiveUsers.map(renderUserRow)}
+          </div>
+        </div>
+      )}
+
+      {users.length === 0 && (
+        <div className="text-center py-12 text-slate-500">
+          <Users size={32} className="mx-auto mb-3 opacity-40" />
+          <p>No users found</p>
+        </div>
+      )}
+
+      {/* Deactivate / Reactivate confirmation dialog */}
+      {actionUser && actionType && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-xl w-full max-w-sm border border-slate-700 shadow-2xl">
+            <div className="p-6">
+              <h3 className="text-lg font-bold text-white mb-2">
+                {actionType === 'deactivate' ? 'Deactivate User' : 'Reactivate User'}
+              </h3>
+              <p className="text-slate-300 text-sm mb-1">
+                {actionType === 'deactivate'
+                  ? `Deactivate <strong>${actionUser.full_name}</strong>? They will no longer be able to log in.`
+                  : `Reactivate <strong>${actionUser.full_name}</strong>? They will be able to log in again.`
+                }
+              </p>
+              <p className="text-slate-400 text-xs">
+                <strong className="text-white">{actionUser.full_name}</strong> &bull; @{actionUser.username} &bull; {actionUser.role_code}
+              </p>
+              {actionError && (
+                <div className="mt-3 flex items-center gap-2 p-3 bg-red-900/40 border border-red-700 rounded-lg text-red-300 text-sm">
+                  <AlertCircle size={16} />
+                  {actionError}
+                </div>
               )}
             </div>
+            <div className="border-t border-slate-700 p-4 flex gap-3">
+              <button
+                onClick={() => { setActionUser(null); setActionType(null); setActionError(''); }}
+                disabled={actionLoading}
+                className="flex-1 py-2.5 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmStatusAction}
+                disabled={actionLoading}
+                className={`flex-1 py-2.5 rounded-lg text-white transition text-sm font-medium disabled:opacity-50 ${
+                  actionType === 'deactivate'
+                    ? 'bg-amber-600 hover:bg-amber-700'
+                    : 'bg-emerald-600 hover:bg-emerald-700'
+                }`}
+              >
+                {actionLoading ? 'Updating...' : actionType === 'deactivate' ? 'Deactivate' : 'Reactivate'}
+              </button>
+            </div>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
 
       {showModal && (
         <UserModal

@@ -892,51 +892,107 @@ export async function createUser(
   }
 }
 
-// Update user status
+// Update user active status — writes to Supabase immediately (admin JWT satisfies
+// users_update_admin RLS + trigger allows is_active changes for admins) and also
+// persists to local IDB as a fallback sync record.
 export async function updateUserStatus(
   userId: string,
   isActive: boolean,
   _actorId?: string,
   _reason?: string
 ): Promise<{ success: boolean; error?: string }> {
-  const user = await getUser(userId);
+  // Try to get the user from IDB first; fall back to Supabase if not cached locally
+  let user = await getUser(userId);
+  if (!user && supabase) {
+    try {
+      const { data } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
+      if (data) user = data as User;
+    } catch { /* network failure — surface below */ }
+  }
   if (!user) return { success: false, error: 'User not found' };
 
   const now = new Date().toISOString();
+
+  // 1. Write to Supabase immediately (admin JWT authorizes this)
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      const { error: sbError } = await supabase
+        .from('users')
+        .update({ is_active: isActive, updated_at: now, sync_status: 'synced' })
+        .eq('id', userId);
+      if (sbError && !isNetworkOrTransportError(sbError)) {
+        return { success: false, error: sbError.message };
+      }
+    } catch (err) {
+      if (!isNetworkOrTransportError(err)) {
+        return { success: false, error: err instanceof Error ? err.message : 'Failed to update user' };
+      }
+    }
+  }
+
+  // 2. Keep IDB in sync
   const updatedUser: User = {
     ...user,
     is_active: isActive,
     updated_at: now,
-    sync_status: 'pending',
+    sync_status: 'synced',
   };
-
   await saveUser(updatedUser);
   return { success: true };
 }
 
-// Update user role
+// Update user role — writes to Supabase immediately (admin JWT satisfies users_update_admin
+// RLS + trigger allows role_code / role_id changes for admins) and also persists to IDB.
 export async function updateUserRole(
   userId: string,
   newRoleCode: RoleCode,
   _actorId?: string,
   _reason?: string
 ): Promise<{ success: boolean; error?: string }> {
-  const user = await getUser(userId);
+  // Try to get the user from IDB first; fall back to Supabase if not cached locally
+  let user = await getUser(userId);
+  if (!user && supabase) {
+    try {
+      const { data } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
+      if (data) user = data as User;
+    } catch { /* network failure */ }
+  }
   if (!user) return { success: false, error: 'User not found' };
 
-  const role = await getRoleByCode(newRoleCode);
-  if (!role) return { success: false, error: 'Invalid role' };
+  // Resolve canonical IDB role ID (role-cashier / role-manager / role-admin)
+  const canonicalRoleId = `role-${newRoleCode}`;
 
   const now = new Date().toISOString();
+
+  // 1. Write to Supabase immediately (admin JWT authorizes this)
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      const { error: sbError } = await supabase
+        .from('users')
+        .update({ role_code: newRoleCode, role_id: canonicalRoleId, updated_at: now, sync_status: 'synced' })
+        .eq('id', userId);
+      if (sbError && !isNetworkOrTransportError(sbError)) {
+        return { success: false, error: sbError.message };
+      }
+    } catch (err) {
+      if (!isNetworkOrTransportError(err)) {
+        return { success: false, error: err instanceof Error ? err.message : 'Failed to update user role' };
+      }
+    }
+  }
+
+  // 2. Keep IDB in sync
   const updatedUser: User = {
     ...user,
-    role_id: role.id,
+    role_id: canonicalRoleId,
     role_code: newRoleCode,
     updated_at: now,
-    sync_status: 'pending',
+    sync_status: 'synced',
   };
-
   await saveUser(updatedUser);
+  // Clear the permission cache so the role change takes effect immediately
+  const { clearPermissionCache } = await import('./permissions');
+  clearPermissionCache(userId);
   return { success: true };
 }
 
