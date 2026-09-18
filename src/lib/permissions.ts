@@ -32,14 +32,16 @@ export async function getUserPermissions(userId: string): Promise<Set<string>> {
     role = await getRoleByCode(user.role_code);
   }
 
-  // If role is found in database/IndexedDB, extract permissions
+  // If role is found in database/IndexedDB, extract permissions.
+  // Use the static PERMISSIONS bundle as the primary name resolver; the IDB permMap
+  // is only supplemental (it may be empty on a fresh browser session).
   if (role && Array.isArray(role.permissions)) {
     const allPermissions = await getAllPermissions();
     const permMap = new Map(allPermissions.map(p => [p.id, p.name]));
 
     const permissionNames = new Set<string>();
     for (const permId of role.permissions) {
-      const permName = permMap.get(permId) || PERMISSIONS.find(p => p.id === permId)?.name;
+      const permName = PERMISSIONS.find(p => p.id === permId)?.name || permMap.get(permId);
       if (permName) permissionNames.add(permName);
     }
 
@@ -47,7 +49,8 @@ export async function getUserPermissions(userId: string): Promise<Set<string>> {
     return permissionNames;
   }
 
-  // 3. Final offline defense: recognized DEFAULT_ROLE_PERMISSIONS entry only for validated system role codes
+  // 3. Final offline defense: resolve from DEFAULT_ROLE_PERMISSIONS using the static PERMISSIONS
+  // bundle, which is always available in the JS bundle regardless of IDB state.
   if (user.role_code && user.role_code in DEFAULT_ROLE_PERMISSIONS) {
     const defaultPermIds = DEFAULT_ROLE_PERMISSIONS[user.role_code as RoleCode];
     const allPermissions = await getAllPermissions();
@@ -55,7 +58,8 @@ export async function getUserPermissions(userId: string): Promise<Set<string>> {
 
     const permissionNames = new Set<string>();
     for (const permId of defaultPermIds) {
-      const permName = permMap.get(permId) || PERMISSIONS.find(p => p.id === permId)?.name;
+      // Prefer the static bundle (always present) over the IDB map (may be empty on fresh session)
+      const permName = PERMISSIONS.find(p => p.id === permId)?.name || permMap.get(permId);
       if (permName) permissionNames.add(permName);
     }
 
