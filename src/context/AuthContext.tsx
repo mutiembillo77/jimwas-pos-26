@@ -1,5 +1,3 @@
-// Auth Context - Provide authentication state to React components
-
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import type { User, RoleCode } from '../lib/security-types';
 import { getCurrentUser, login as authLogin, logout as authLogout, initializeSecurity, requestPasswordReset, resendConfirmationEmail } from '../lib/auth';
@@ -7,11 +5,14 @@ import { clearOfflineAuthSnapshot } from '../lib/db';
 import { clearAllPermissionCache } from '../lib/permissions';
 import { initializeApp, shouldAutoRestore } from '../lib/init';
 import { supabase } from '../lib/supabaseClient';
+import { ResetPasswordModal } from '../components/ResetPasswordModal';
 
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  isRecoveryMode: boolean;
+  setIsRecoveryMode: (val: boolean) => void;
   login: (identifier: string, password: string) => Promise<{ success: boolean; error?: string; isEmailUnconfirmed?: boolean; unconfirmedEmail?: string }>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -24,9 +25,19 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
+
+    // Check if landing via password recovery link in URL hash
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash || '';
+      if (hash.includes('type=recovery')) {
+        console.log('[AUTH DEBUG] Detected password recovery hash in URL');
+        setIsRecoveryMode(true);
+      }
+    }
 
     async function init() {
       try {
@@ -73,7 +84,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (supabase) {
       const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
         console.log('[AUTH DEBUG] onAuthStateChange event:', event, '| session exists:', !!session);
-        if (event === 'SIGNED_OUT' || !session) {
+        if (event === 'PASSWORD_RECOVERY') {
+          console.log('[AUTH DEBUG] PASSWORD_RECOVERY event detected');
+          if (isMounted) {
+            setIsRecoveryMode(true);
+          }
+        } else if (event === 'SIGNED_OUT' || !session) {
           // Explicit signout or missing session invalidates local authorization snapshot
           await clearOfflineAuthSnapshot();
           if (isMounted) {
@@ -155,6 +171,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isLoading,
         isAuthenticated: !!user,
+        isRecoveryMode,
+        setIsRecoveryMode,
         login,
         logout,
         refreshUser,
@@ -163,6 +181,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }}
     >
       {children}
+      <ResetPasswordModal
+        isOpen={isRecoveryMode}
+        onSuccess={async () => {
+          setIsRecoveryMode(false);
+          const freshUser = await getCurrentUser();
+          if (freshUser) {
+            setUser(freshUser);
+            clearAllPermissionCache();
+          }
+        }}
+        onClose={() => setIsRecoveryMode(false)}
+      />
     </AuthContext.Provider>
   );
 }

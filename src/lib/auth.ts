@@ -608,7 +608,9 @@ export async function requestPasswordReset(email: string): Promise<{ success: bo
   }
 
   try {
-    const redirectTo = typeof window !== 'undefined' ? window.location.origin : undefined;
+    const redirectTo = typeof window !== 'undefined' && window.location.origin
+      ? window.location.origin
+      : 'https://jimwas-yn.vercel.app';
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
       redirectTo,
     });
