@@ -182,8 +182,8 @@ describe('Realtime Relational Sync & Channel Lifecycle', () => {
     expect(recordedEvents[0].eventType).toBe('INSERT');
   });
 
-  // Test 2: transaction_items INSERT triggers parent transaction retrieval
-  it('2. transaction_items INSERT triggers parent transaction reload with complete items', async () => {
+  // Test 2: transaction_items INSERT updates local IDB directly without REST query
+  it('2. transaction_items INSERT triggers parent transaction update with complete items in IndexedDB', async () => {
     cleanupRealtime = initRealtimeSync();
 
     const mockTxId = 'tx-rt-002';
@@ -191,15 +191,13 @@ describe('Realtime Relational Sync & Channel Lifecycle', () => {
       { id: 'item-a', transaction_id: mockTxId, product_name: 'Vines', quantity: 4, unit_price: 100, subtotal: 400 }
     ];
 
-    mockSupabaseSelectResult = {
-      data: {
-        id: mockTxId,
-        total_amount: 400,
-        payment_method: 'cash',
-        status: 'completed',
-        transaction_items: mockItems,
-      },
-      error: null,
+    // Seed existing transaction in IDB
+    mockDbExistingRecords[`transactions:${mockTxId}`] = {
+      id: mockTxId,
+      total_amount: 400,
+      payment_method: 'cash',
+      status: 'completed',
+      items: [],
     };
 
     realtimeCallback!({
@@ -211,10 +209,14 @@ describe('Realtime Relational Sync & Channel Lifecycle', () => {
 
     await flushAsync();
 
-    expect(mockDbPuts).toHaveLength(1);
-    expect(mockDbPuts[0].store).toBe('transactions');
-    expect(mockDbPuts[0].value.id).toBe(mockTxId);
-    expect(mockDbPuts[0].value.items).toEqual(mockItems);
+    const itemPut = mockDbPuts.find((p) => p.store === 'transaction_items');
+    expect(itemPut).toBeDefined();
+    expect(itemPut?.value.id).toBe('item-a');
+
+    const txPut = mockDbPuts.find((p) => p.store === 'transactions');
+    expect(txPut).toBeDefined();
+    expect(txPut?.value.id).toBe(mockTxId);
+    expect(txPut?.value.items).toEqual(mockItems);
     expect(recordedEvents[0].table).toBe('transactions');
   });
 
@@ -223,33 +225,33 @@ describe('Realtime Relational Sync & Channel Lifecycle', () => {
     cleanupRealtime = initRealtimeSync();
 
     const mockTxId = 'tx-rt-003';
-    const updatedItems = [
-      { id: 'item-b', transaction_id: mockTxId, product_name: 'Vines', quantity: 5, unit_price: 100, subtotal: 500 }
-    ];
+    const initialItem = { id: 'item-b', transaction_id: mockTxId, product_name: 'Vines', quantity: 4, unit_price: 100, subtotal: 400 };
 
-    mockSupabaseSelectResult = {
-      data: {
-        id: mockTxId,
-        total_amount: 500,
-        payment_method: 'cash',
-        status: 'completed',
-        transaction_items: updatedItems,
-      },
-      error: null,
+    mockDbExistingRecords[`transactions:${mockTxId}`] = {
+      id: mockTxId,
+      total_amount: 500,
+      payment_method: 'cash',
+      status: 'completed',
+      items: [initialItem],
     };
 
     realtimeCallback!({
       table: 'transaction_items',
       eventType: 'UPDATE',
-      new: { id: 'item-b', transaction_id: mockTxId, quantity: 5, subtotal: 500 },
-      old: { id: 'item-b', transaction_id: mockTxId, quantity: 4, subtotal: 400 },
+      new: { id: 'item-b', transaction_id: mockTxId, product_name: 'Vines', quantity: 5, unit_price: 100, subtotal: 500 },
+      old: { id: 'item-b', transaction_id: mockTxId, product_name: 'Vines', quantity: 4, unit_price: 100, subtotal: 400 },
     });
 
     await flushAsync();
 
-    expect(mockDbPuts).toHaveLength(1);
-    expect(mockDbPuts[0].value.id).toBe(mockTxId);
-    expect(mockDbPuts[0].value.items[0].quantity).toBe(5);
+    const itemPut = mockDbPuts.find((p) => p.store === 'transaction_items');
+    expect(itemPut).toBeDefined();
+    expect(itemPut?.value.quantity).toBe(5);
+
+    const txPut = mockDbPuts.find((p) => p.store === 'transactions');
+    expect(txPut).toBeDefined();
+    expect(txPut?.value.id).toBe(mockTxId);
+    expect(txPut?.value.items[0].quantity).toBe(5);
   });
 
   // Test 4: transaction_items DELETE reloads parent transaction without stale item
@@ -257,15 +259,12 @@ describe('Realtime Relational Sync & Channel Lifecycle', () => {
     cleanupRealtime = initRealtimeSync();
 
     const mockTxId = 'tx-rt-004';
-    mockSupabaseSelectResult = {
-      data: {
-        id: mockTxId,
-        total_amount: 0,
-        payment_method: 'cash',
-        status: 'completed',
-        transaction_items: [],
-      },
-      error: null,
+    mockDbExistingRecords[`transactions:${mockTxId}`] = {
+      id: mockTxId,
+      total_amount: 0,
+      payment_method: 'cash',
+      status: 'completed',
+      items: [{ id: 'deleted-item-id', transaction_id: mockTxId }],
     };
 
     realtimeCallback!({
@@ -277,9 +276,13 @@ describe('Realtime Relational Sync & Channel Lifecycle', () => {
 
     await flushAsync();
 
-    expect(mockDbPuts).toHaveLength(1);
-    expect(mockDbPuts[0].value.id).toBe(mockTxId);
-    expect(mockDbPuts[0].value.items).toEqual([]);
+    expect(mockDbDeletes).toHaveLength(1);
+    expect(mockDbDeletes[0]).toEqual({ store: 'transaction_items', key: 'deleted-item-id' });
+
+    const txPut = mockDbPuts.find((p) => p.store === 'transactions');
+    expect(txPut).toBeDefined();
+    expect(txPut?.value.id).toBe(mockTxId);
+    expect(txPut?.value.items).toEqual([]);
   });
 
   // Test 5: flat realtime payload fallback preserves existing items locally

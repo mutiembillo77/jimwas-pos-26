@@ -53,6 +53,11 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isSubmittingRef = useRef(false);
   const checkoutSessionIdRef = useRef(generateId());
+  // Phase A: Tracks whether the initial authoritative Supabase KCB settings fetch has
+  // already been performed. Only the first loadData() call makes a direct REST request;
+  // subsequent calls (triggered by sync notifications) read from IndexedDB, eliminating
+  // the kcb_settings REST round-trip on every heartbeat notification.
+  const kcbFetchedOnceRef = useRef(false);
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustomer, setNewCustomer] = useState<{ name: string; phone: string; email: string; customer_source: CustomerSource }>({ name: '', phone: '', email: '', customer_source: 'WALK_IN' });
   const [showAddProduct, setShowAddProduct] = useState(false);
@@ -97,8 +102,13 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
     loadSavedParkedSales();
 
     const unsubscribe = subscribeToDataChanges(({ table }) => {
-      if (['products', 'customers', 'payment_accounts', 'business_settings', '*'].includes(table)) {
-        loadData();
+      // Phase A: '*' (heartbeat-pull / remote-pull) is intentionally excluded.
+      // Wildcard notifications fire on every heartbeat cycle and previously caused
+      // loadData() to issue a direct kcb_settings REST request on each tick.
+      // 'kcb_settings' is added explicitly so genuine remote KCB updates still
+      // refresh the POS terminal from the IDB-cached value.
+      if (['products', 'customers', 'payment_accounts', 'business_settings', 'kcb_settings'].includes(table)) {
+        void loadData();
       }
     });
     return () => unsubscribe();
@@ -145,16 +155,22 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
 
     if (accounts.length > 0 && !paymentAccountId) setPaymentAccountId(accounts[0].id);
 
-    // Always try Supabase first for KCB settings (authoritative source)
+    // Phase A: Fetch KCB settings directly from Supabase only on the first invocation
+    // (initial mount). Subsequent calls triggered by sync notifications use the IDB-cached
+    // value, which is kept current by the background heartbeat and Realtime channel.
+    // This eliminates the repeated kcb_settings REST request on every heartbeat tick.
     let kcbSettings = idbMpesa;
-    const supabase = getSupabase();
-    if (supabase) {
-      const { data } = await supabase
-        .from('kcb_settings')
-        .select('*')
-        .eq('id', 'kcb-settings')
-        .maybeSingle();
-      if (data) kcbSettings = data;
+    if (!kcbFetchedOnceRef.current) {
+      kcbFetchedOnceRef.current = true;
+      const supabase = getSupabase();
+      if (supabase) {
+        const { data } = await supabase
+          .from('kcb_settings')
+          .select('*')
+          .eq('id', 'kcb-settings')
+          .maybeSingle();
+        if (data) kcbSettings = data;
+      }
     }
 
     setKCBEnabled(kcbSettings?.is_enabled ?? false);
