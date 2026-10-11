@@ -12,7 +12,7 @@ import { useDebounce } from '../hooks/useDebounce';
 import { SaleTypeSelector } from '../components/SaleTypeSelector';
 import { createDelivery } from '../lib/enterprise';
 import type { Product, Customer, CartItem, SaleType, CustomerSource } from '../lib/types';
-import type { User } from '../lib/security-types';
+import type { User as UserType } from '../lib/security-types';
 import type { PaymentAccount } from '../lib/settings-types';
 import { PaymentMethod, PaymentTiming } from '../types/payment';
 
@@ -44,7 +44,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
   const [paymentAccountId, setPaymentAccountId] = useState<string | null>(null);
   // Served By — staff member who handled this customer at checkout
-  const [staffUsers, setStaffUsers] = useState<User[]>([]);
+  const [staffUsers, setStaffUsers] = useState<UserType[]>([]);
   const [servedById, setServedById] = useState<string>('');
   const [servedByName, setServedByName] = useState<string>('');
   const selectedPaymentAccount = paymentAccounts.find((account) => account.id === paymentAccountId) ?? null;
@@ -1106,7 +1106,7 @@ const POSTerminal = ({ onDeliveryRequested }: { onDeliveryRequested?: (transacti
                     { id: 'from_cbd_300' as const, label: 'Delivery Fee from CBD — KES 300', amount: 300 },
                     { id: 'from_cbd_400' as const, label: 'Delivery Fee from CBD — KES 400', amount: 400 },
                     { id: 'from_cbd_500' as const, label: 'Delivery Fee from CBD — KES 500', amount: 500 },
-                  ].map(({ id, label, amount }) => (
+                  ].map(({ id, label }) => (
                     <button
                       key={id}
                       type="button"

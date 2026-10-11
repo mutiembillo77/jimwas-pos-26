@@ -682,7 +682,7 @@ const TABLE_CONFIGS: TableSyncConfig[] = [
   { table: 'expense_categories', store: 'expense_categories' },
   { table: 'shifts', store: 'shifts', orderBy: 'opened_at', limit: 500 },
   { table: 'reconciliations', store: 'reconciliations', orderBy: 'created_at', limit: 1000 },
-  { table: 'period_reconciliations', store: 'period_reconciliations', orderBy: 'updated_at', limit: 1000 },
+  { table: 'period_reconciliations', store: 'reconciliations', orderBy: 'updated_at', limit: 1000 },
   { table: 'outbound_deliveries', store: 'outbound_deliveries', orderBy: 'updated_at', limit: 1000 },
   { table: 'offers', store: 'offers' },
   { table: 'supplier_fulfillments', store: 'supplier_fulfillments', orderBy: 'created_at', limit: 1000 },
