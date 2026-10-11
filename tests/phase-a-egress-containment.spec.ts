@@ -121,6 +121,7 @@ import {
   resetSyncCircuitBreakerForTesting,
   subscribeToDataChanges,
   syncNow,
+  TABLE_CONFIGS,
   type DataChangeDetail,
 } from '../src/lib/sync';
 
@@ -550,6 +551,19 @@ describe('Phase A — Egress Containment', () => {
     it('S3. getRemoteSyncPaused and getSyncPausedUntilMs are exported functions', () => {
       expect(typeof getRemoteSyncPaused).toBe('function');
       expect(typeof getSyncPausedUntilMs).toBe('function');
+    });
+
+    it('S4. TABLE_CONFIGS maintains 1:1 store isolation and excludes online-only period_reconciliations', () => {
+      // period_reconciliations has no local IndexedDB store and must not be mapped into the payment reconciliations store
+      expect(TABLE_CONFIGS.some(c => c.table === 'period_reconciliations')).toBe(false);
+      // reconciliations table maps strictly to the dedicated payment reconciliations store
+      const reconConfig = TABLE_CONFIGS.find(c => c.table === 'reconciliations');
+      expect(reconConfig).toBeDefined();
+      expect(reconConfig?.store).toBe('reconciliations');
+      // All configured tables map 1:1 to their matching dedicated store name
+      for (const config of TABLE_CONFIGS) {
+        expect(config.store).toBe(config.table);
+      }
     });
 
   });

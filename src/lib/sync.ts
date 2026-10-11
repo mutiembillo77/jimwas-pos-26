@@ -657,7 +657,7 @@ interface TableSyncConfig {
   orderBy?: string;
 }
 
-const TABLE_CONFIGS: TableSyncConfig[] = [
+export const TABLE_CONFIGS: TableSyncConfig[] = [
   { table: 'customers', store: 'customers', uniqueIndex: 'by-phone', uniqueField: 'phone' },
   { table: 'products', store: 'products', uniqueIndex: 'by-sku', uniqueField: 'sku' },
   { table: 'transactions', store: 'transactions', relation: { table: 'transaction_items', field: 'transaction_items' } },
@@ -682,7 +682,6 @@ const TABLE_CONFIGS: TableSyncConfig[] = [
   { table: 'expense_categories', store: 'expense_categories' },
   { table: 'shifts', store: 'shifts', orderBy: 'opened_at', limit: 500 },
   { table: 'reconciliations', store: 'reconciliations', orderBy: 'created_at', limit: 1000 },
-  { table: 'period_reconciliations', store: 'reconciliations', orderBy: 'updated_at', limit: 1000 },
   { table: 'outbound_deliveries', store: 'outbound_deliveries', orderBy: 'updated_at', limit: 1000 },
   { table: 'offers', store: 'offers' },
   { table: 'supplier_fulfillments', store: 'supplier_fulfillments', orderBy: 'created_at', limit: 1000 },
