@@ -3,7 +3,7 @@ import { DEFAULT_PAYMENT_ACCOUNTS, type PaymentAccount } from '../src/lib/settin
 import { ensurePaymentAccounts } from '../src/lib/init';
 
 // In-memory mock for IndexedDB store
-let mockStore = new Map<string, PaymentAccount>();
+const mockStore = new Map<string, PaymentAccount>();
 
 vi.mock('../src/lib/db', () => ({
   getDB: vi.fn().mockResolvedValue({

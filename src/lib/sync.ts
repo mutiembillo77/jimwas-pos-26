@@ -1017,7 +1017,11 @@ export function initRealtimeSync(): () => void {
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           console.warn(`[Sync] Realtime channel status: ${status}, resetting channel reference`);
           if (realtimeChannel && client) {
-            try { void client.removeChannel(realtimeChannel); } catch {}
+            try {
+              void client.removeChannel(realtimeChannel);
+            } catch (err) {
+              console.warn('[Sync] Non-fatal error cleaning up realtime channel on disconnect:', err);
+            }
           }
           realtimeChannel = null;
         }
