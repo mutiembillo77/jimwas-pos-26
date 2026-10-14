@@ -174,7 +174,7 @@ export function ManualHistoricalSalesModal({
         business_date: businessDate,
         branch_id: branchId,
         source,
-        status: (Number(entryData.eod_total) > 0 || (Number(entryData.transaction_count) ?? 0) > 0) ? 'COMPLETE' : 'MISSING',
+        status: (Number(entryData.eod_total) > 0 || Number(entryData.transaction_count ?? 0) > 0) ? 'COMPLETE' : 'MISSING',
         transaction_count: entryData.transaction_count || 0,
         gross_sales: entryData.gross_sales || 0,
         discounts: entryData.discounts || 0,

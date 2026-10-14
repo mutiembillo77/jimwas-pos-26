@@ -4,8 +4,8 @@ import { PERMISSIONS, DEFAULT_ROLE_PERMISSIONS } from '../src/lib/security-types
 import { canAccessRoute, getRouteConfig } from '../src/lib/rbac-config';
 
 // In-memory backing store for IndexedDB mock
-let rolesStore = new Map<string, Role>();
-let usersStore = new Map<string, User>();
+const rolesStore = new Map<string, Role>();
+const usersStore = new Map<string, User>();
 let permissionsStore = new Map<string, Permission>();
 let offlineSnapshot: OfflineAuthSnapshot | null = null;
 

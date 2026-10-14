@@ -11,6 +11,154 @@ export function getSupabase(): SupabaseClient | null {
 let isOnline = typeof navigator === 'undefined' ? true : (navigator.onLine ?? true);
 let isSyncing = false;
 
+// ── Phase A: Egress Circuit Breaker ──────────────────────────────────────────
+// Remote pulls are suspended when Supabase returns HTTP 402 (exceeded_egress_quota).
+// The suspension is process/tab-local; a page reload resets the gate, allowing the
+// app to recover gracefully once quota is restored without a forced deployment.
+let remoteSyncPaused = false;
+// Guards syncFromRemote() against concurrent calls regardless of entry point
+// (heartbeat, syncNow, triggerSync, online-restore). Prevents overlapping REST sweeps.
+let isRemotePulling = false;
+// Epoch ms after which a 429-throttled pull is permitted to resume.
+let syncPausedUntilMs = 0;
+
+/** Returns true if remote pulls are suspended due to quota exhaustion (HTTP 402). */
+export function getRemoteSyncPaused(): boolean { return remoteSyncPaused; }
+/** Returns the epoch ms until which remote pulls are rate-limited (HTTP 429 backoff). */
+export function getSyncPausedUntilMs(): number { return syncPausedUntilMs; }
+/** Resets circuit-breaker and rate-limiting state (used for testing and test isolation). */
+export function resetSyncCircuitBreakerForTesting(): void {
+  remoteSyncPaused = false;
+  syncPausedUntilMs = 0;
+  isRemotePulling = false;
+}
+
+/**
+ * Thrown by syncTableFromRemote when Supabase responds with HTTP 402 /
+ * exceeded_egress_quota. Causes syncFromRemote to halt the table sweep
+ * immediately and stop the background heartbeat.
+ */
+class QuotaExhaustedError extends Error {
+  constructor(table: string) {
+    super(`[Sync] HTTP 402 — Supabase egress quota exhausted on table "${table}". Remote pulls suspended.`);
+    this.name = 'QuotaExhaustedError';
+  }
+}
+
+/**
+ * Thrown by syncTableFromRemote when Supabase responds with HTTP 429.
+ * Causes syncFromRemote to abort the current sweep and wait before retrying.
+ */
+class RateLimitedError extends Error {
+  readonly retryAfterMs: number;
+  constructor(table: string, retryAfterMs: number) {
+    super(`[Sync] HTTP 429 — Rate limited on table "${table}". Retry in ${retryAfterMs}ms.`);
+    this.name = 'RateLimitedError';
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+const DEFAULT_RETRY_AFTER_MS = 10_000;
+const MAX_RETRY_AFTER_MS = 60_000;
+
+/**
+ * Extracts and parses a Retry-After delay (in milliseconds) from a Supabase/PostgREST
+ * error object or response headers.
+ * Supports:
+ * - Integer seconds (e.g. 5, "5")
+ * - HTTP-date strings (e.g. "Wed, 21 Oct 2026 07:28:00 GMT")
+ * Falls back to 10,000 ms if missing, invalid, or negative.
+ * Delay is strictly bounded to [0, 60_000] ms.
+ */
+export function parseRetryAfter(error: unknown): number {
+  if (!error || typeof error !== 'object') {
+    return DEFAULT_RETRY_AFTER_MS;
+  }
+  const e = error as Record<string, unknown>;
+
+  let raw: unknown = undefined;
+
+  if (e['retryAfter'] !== undefined) {
+    raw = e['retryAfter'];
+  } else if (e['retry_after'] !== undefined) {
+    raw = e['retry_after'];
+  } else if (e['headers'] && typeof e['headers'] === 'object') {
+    const h = e['headers'] as Record<string, unknown> & { get?: (k: string) => string | null };
+    if (typeof h.get === 'function') {
+      raw = h.get('retry-after') ?? h.get('Retry-After');
+    } else {
+      raw = h['retry-after'] ?? h['Retry-After'] ?? h['retry_after'];
+    }
+  } else if (e['response'] && typeof e['response'] === 'object') {
+    const resp = e['response'] as Record<string, unknown>;
+    if (resp['headers'] && typeof resp['headers'] === 'object') {
+      const h = resp['headers'] as Record<string, unknown> & { get?: (k: string) => string | null };
+      if (typeof h.get === 'function') {
+        raw = h.get('retry-after') ?? h.get('Retry-After');
+      } else {
+        raw = h['retry-after'] ?? h['Retry-After'] ?? h['retry_after'];
+      }
+    }
+  }
+
+  if (raw === undefined || raw === null) {
+    const msg = `${e['message'] ?? ''} ${e['details'] ?? ''}`;
+    const match = /retry-after[:\s]+(["']?)([^"'\r\n,;]+)\1/i.exec(msg);
+    if (match) {
+      raw = match[2].trim();
+    }
+  }
+
+  if (raw === undefined || raw === null || raw === '') {
+    return DEFAULT_RETRY_AFTER_MS;
+  }
+
+  let delayMs: number | null = null;
+
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    delayMs = raw * 1000;
+  } else if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const secs = parseInt(trimmed, 10);
+      if (Number.isFinite(secs)) {
+        delayMs = secs * 1000;
+      }
+    } else {
+      const parsedDate = Date.parse(trimmed);
+      if (!Number.isNaN(parsedDate)) {
+        const diff = parsedDate - Date.now();
+        delayMs = Math.max(0, diff);
+      }
+    }
+  }
+
+  if (delayMs === null || Number.isNaN(delayMs)) {
+    return DEFAULT_RETRY_AFTER_MS;
+  }
+
+  return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, delayMs));
+}
+
+/**
+ * Inspects a Supabase REST error object and throws a typed circuit-breaker error
+ * when the response indicates quota exhaustion (402) or rate limiting (429).
+ * All other errors are left for the caller to handle normally.
+ */
+function detectQuotaOrRateLimit(error: unknown, table: string): void {
+  if (!error || typeof error !== 'object') return;
+  const e = error as { status?: number; code?: string | number; message?: string; details?: string };
+  const httpStatus = typeof e.status === 'number' ? e.status : NaN;
+  const msgLower = `${e.message ?? ''} ${e.details ?? ''}`.toLowerCase();
+  if (httpStatus === 402 || msgLower.includes('exceeded_egress_quota') || msgLower.includes('exceed_egress')) {
+    throw new QuotaExhaustedError(table);
+  }
+  if (httpStatus === 429 || msgLower.includes('rate limit')) {
+    const retryAfterMs = parseRetryAfter(error);
+    throw new RateLimitedError(table, retryAfterMs);
+  }
+}
+
 export type SyncStatus = 'synced' | 'pending' | 'syncing' | 'error' | 'offline' | 'degraded';
 
 export interface SyncState {
@@ -177,7 +325,7 @@ export function initNetworkListeners() {
   });
   checkPendingCount();
   initRealtimeSync();
-  initBackgroundSyncHeartbeat(15000);
+  initBackgroundSyncHeartbeat();
 }
 
 async function checkPendingCount() {
@@ -509,7 +657,7 @@ interface TableSyncConfig {
   orderBy?: string;
 }
 
-const TABLE_CONFIGS: TableSyncConfig[] = [
+export const TABLE_CONFIGS: TableSyncConfig[] = [
   { table: 'customers', store: 'customers', uniqueIndex: 'by-phone', uniqueField: 'phone' },
   { table: 'products', store: 'products', uniqueIndex: 'by-sku', uniqueField: 'sku' },
   { table: 'transactions', store: 'transactions', relation: { table: 'transaction_items', field: 'transaction_items' } },
@@ -534,7 +682,6 @@ const TABLE_CONFIGS: TableSyncConfig[] = [
   { table: 'expense_categories', store: 'expense_categories' },
   { table: 'shifts', store: 'shifts', orderBy: 'opened_at', limit: 500 },
   { table: 'reconciliations', store: 'reconciliations', orderBy: 'created_at', limit: 1000 },
-  { table: 'period_reconciliations', store: 'period_reconciliations', orderBy: 'updated_at', limit: 1000 },
   { table: 'outbound_deliveries', store: 'outbound_deliveries', orderBy: 'updated_at', limit: 1000 },
   { table: 'offers', store: 'offers' },
   { table: 'supplier_fulfillments', store: 'supplier_fulfillments', orderBy: 'created_at', limit: 1000 },
@@ -637,7 +784,14 @@ async function syncTableFromRemote(client: SupabaseClient, db: Awaited<ReturnTyp
     query = query.limit(config.limit);
   }
 
-  const { data } = await query;
+  const { data, error } = await query;
+  if (error) {
+    // Throws QuotaExhaustedError or RateLimitedError for HTTP 402/429;
+    // all other errors are logged and the table is skipped non-fatally.
+    detectQuotaOrRateLimit(error, config.table);
+    console.warn(`[Sync] Remote pull skipped for "${config.table}": ${error.message ?? String(error)}`);
+    return;
+  }
   if (!data) return;
 
   // Supabase returns `any[]` at runtime; the generic type can include a ParserError
@@ -704,50 +858,63 @@ async function syncTableFromRemote(client: SupabaseClient, db: Awaited<ReturnTyp
 let realtimeChannel: ReturnType<NonNullable<ReturnType<typeof getSupabase>>['channel']> | null = null;
 let backgroundHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
+/**
+ * Stops the background heartbeat timer immediately.
+ * Called by syncFromRemote when an HTTP 402 circuit-break is triggered to
+ * prevent a retry storm of quota-exhausted requests.
+ */
+function stopBackgroundHeartbeat(): void {
+  if (backgroundHeartbeatTimer) {
+    clearInterval(backgroundHeartbeatTimer);
+    backgroundHeartbeatTimer = null;
+    console.log('[Sync] Background heartbeat stopped (quota exhausted — HTTP 402).');
+  }
+}
+
 async function handleRealtimeChange(payload: { table: string; eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }) {
   try {
     const { table, eventType } = payload;
 
-    // Handle transaction_items changes by updating the parent transaction in IndexedDB
+    // Phase A: Handle transaction_items Realtime events by updating IndexedDB directly
+    // from the event payload, avoiding the relational REST re-fetch that was the primary
+    // Realtime egress amplification path. The parent transaction's embedded items array
+    // is updated using only locally-held IDB data — no Supabase round-trip required.
     if (table === 'transaction_items') {
       const txId = (payload.new?.transaction_id || payload.old?.transaction_id) as string | undefined;
       if (txId) {
-        const client = getSupabase();
-        if (client) {
-          const { data, error } = await client
-            .from('transactions')
-            .select('*, transaction_items(*)')
-            .eq('id', txId)
-            .maybeSingle();
-          if (!error && data) {
-            const db = await getDB();
-            const row = (data as unknown) as Record<string, unknown>;
-            const existing = await db.get('transactions', txId);
-            let existingItems = (existing as Record<string, unknown> | undefined)?.items;
-            if (!Array.isArray(existingItems) || existingItems.length === 0) {
-              try {
-                const idbChildItems = await db.getAllFromIndex('transaction_items', 'by-transaction', txId as never);
-                if (Array.isArray(idbChildItems) && idbChildItems.length > 0) {
-                  existingItems = idbChildItems;
-                }
-              } catch { /* db may not support getAllFromIndex in all environments */ }
+        const db = await getDB();
+        if (eventType === 'DELETE') {
+          const itemId = payload.old?.id as string | undefined;
+          if (itemId) {
+            await db.delete('transaction_items', itemId as never).catch(() => {});
+            const tx = await db.get('transactions', txId as never);
+            if (tx) {
+              const existingItems = Array.isArray((tx as Record<string, unknown>).items)
+                ? (tx as Record<string, unknown>).items as Record<string, unknown>[]
+                : [];
+              const updatedItems = existingItems.filter(it => it.id !== itemId);
+              await db.put('transactions', { ...(tx as Record<string, unknown>), items: updatedItems } as never);
             }
-            const remoteItems = row['transaction_items'];
-            const mergedItems = mergeRelationalItems(
-              Array.isArray(existingItems) ? existingItems : [],
-              Array.isArray(remoteItems) ? remoteItems : []
-            );
-
-            const fullRecord = {
-              ...row,
-              sync_status: 'synced',
-              items: mergedItems,
-            };
-            await db.put('transactions', fullRecord as never);
-            notifyDataUpdated('transactions', eventType, fullRecord);
-            return;
+          }
+        } else if (eventType === 'INSERT' || eventType === 'UPDATE') {
+          const item = payload.new;
+          if (item?.id) {
+            await db.put('transaction_items', item as never).catch(() => {});
+            const tx = await db.get('transactions', txId as never);
+            if (tx) {
+              const existingItems = Array.isArray((tx as Record<string, unknown>).items)
+                ? (tx as Record<string, unknown>).items as Record<string, unknown>[]
+                : [];
+              const idx = existingItems.findIndex(it => it.id === item.id);
+              const updatedItems = idx >= 0
+                ? existingItems.map(it => (it.id === item.id ? (item as Record<string, unknown>) : it))
+                : [...existingItems, item];
+              await db.put('transactions', { ...(tx as Record<string, unknown>), items: updatedItems } as never);
+            }
           }
         }
+        notifyDataUpdated('transactions', eventType);
+        return;
       }
     }
 
@@ -850,7 +1017,11 @@ export function initRealtimeSync(): () => void {
         } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           console.warn(`[Sync] Realtime channel status: ${status}, resetting channel reference`);
           if (realtimeChannel && client) {
-            try { void client.removeChannel(realtimeChannel); } catch {}
+            try {
+              void client.removeChannel(realtimeChannel);
+            } catch (err) {
+              console.warn('[Sync] Non-fatal error cleaning up realtime channel on disconnect:', err);
+            }
           }
           realtimeChannel = null;
         }
@@ -868,12 +1039,20 @@ export function initRealtimeSync(): () => void {
   };
 }
 
-export function initBackgroundSyncHeartbeat(intervalMs = 15000): () => void {
+export function initBackgroundSyncHeartbeat(
+  // Realtime provides near-real-time multi-terminal propagation; the heartbeat is a
+  // fallback reconciliation mechanism only and must not continuously sweep the database.
+  // Default changed from 15 s to 5 min (300 s) as part of Phase A egress containment.
+  intervalMs = 300_000
+): () => void {
   if (typeof window === 'undefined') return () => {};
   if (backgroundHeartbeatTimer) return () => {};
 
   backgroundHeartbeatTimer = setInterval(() => {
-    if (isOnline && !isSyncing && getSupabase()) {
+    // Phase A guards: skip if quota-exhausted, rate-limited, or a pull/sync is already
+    // in flight. syncFromRemote() also checks these internally; the outer checks here
+    // avoid even entering the async function unnecessarily.
+    if (isOnline && !isSyncing && !isRemotePulling && !remoteSyncPaused && getSupabase()) {
       void syncFromRemote().then(() => {
         notifyDataUpdated('*', 'heartbeat-pull');
       }).catch(err => {
@@ -891,19 +1070,62 @@ export function initBackgroundSyncHeartbeat(intervalMs = 15000): () => void {
 }
 
 async function syncFromRemote() {
+  // ── Phase A circuit-breaker checks ───────────────────────────────────────────
+  // 1. Quota exhausted: do not issue any remote pulls until the page is reloaded
+  //    or quota is restored. Prevents retry storms after HTTP 402.
+  if (remoteSyncPaused) {
+    console.log('[Sync] Remote sync paused (HTTP 402 quota exhausted). Skipping pull.');
+    return;
+  }
+  // 2. Rate-limit backoff window: skip until the wait period elapses (HTTP 429).
+  if (syncPausedUntilMs > Date.now()) {
+    console.log(`[Sync] Remote sync rate-limited. Will resume after ${new Date(syncPausedUntilMs).toISOString()}.`);
+    return;
+  }
+  // 3. Concurrency guard: at most one remote pull active at any time, regardless of
+  //    entry point (heartbeat, syncNow, triggerSync, online-restore).
+  if (isRemotePulling) {
+    console.log('[Sync] Remote pull already in progress — skipping concurrent request.');
+    return;
+  }
+
   const client = getSupabase();
   if (!client) return;
-  const db = await getDB();
 
-  for (const config of TABLE_CONFIGS) {
-    try {
-      await syncTableFromRemote(client, db, config);
-    } catch (error) {
-      console.error(`Failed to sync ${config.table}:`, error);
+  isRemotePulling = true;
+  try {
+    const db = await getDB();
+    for (const config of TABLE_CONFIGS) {
+      try {
+        await syncTableFromRemote(client, db, config);
+      } catch (error) {
+        if (error instanceof QuotaExhaustedError) {
+          // HTTP 402: suspend all future remote pulls and stop the background
+          // heartbeat immediately to prevent a retry storm.
+          remoteSyncPaused = true;
+          syncState.status = 'error';
+          syncState.error = 'Supabase egress quota exhausted (HTTP 402). Remote sync suspended. Local operations continue normally.';
+          notifySyncState();
+          stopBackgroundHeartbeat();
+          console.error(error.message);
+          return; // Abort the table sweep — do not attempt remaining tables.
+        }
+        if (error instanceof RateLimitedError) {
+          // HTTP 429: record the backoff deadline and abort this sweep.
+          // The next heartbeat tick will skip if still within the window.
+          syncPausedUntilMs = Date.now() + error.retryAfterMs;
+          console.warn(error.message);
+          return;
+        }
+        // Unclassified error for this table — log and continue with the next table.
+        console.error(`[Sync] Failed to sync "${config.table}":`, error);
+      }
     }
+    syncState.lastPull = new Date().toISOString();
+    notifyDataUpdated('*', 'remote-pull');
+  } finally {
+    isRemotePulling = false;
   }
-  syncState.lastPull = new Date().toISOString();
-  notifyDataUpdated('*', 'remote-pull');
 }
 
 export async function syncNow(): Promise<{ success: boolean; message: string }> {

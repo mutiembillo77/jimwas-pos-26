@@ -844,7 +844,10 @@ async function hydrateTransactionItems(
       void db.put('transactions', tx).catch(() => {});
       return tx;
     }
-  } catch {}
+  } catch {
+    // Intentional fall-through: if transaction_items store lookup encounters an error,
+    // proceed to Level 2 recovery using stock movements and product catalog.
+  }
 
   // Level 2: Authoritative local recovery from stock movements + product catalog
   try {
@@ -874,7 +877,10 @@ async function hydrateTransactionItems(
         return tx;
       }
     }
-  } catch {}
+  } catch {
+    // Intentional fall-through: if stock movement reconstruction encounters an error,
+    // proceed to Level 3 marking item_integrity_status as 'missing'.
+  }
 
   // Level 3: No genuine line-item evidence exists.
   // CRITICAL: A financial POS must NEVER fabricate synthetic product items.

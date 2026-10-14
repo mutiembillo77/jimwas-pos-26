@@ -140,9 +140,9 @@ export function buildDailySalesReport(
       let cash = 0;
       let mpesa = 0;
       let other = 0;
-      let discounts = 0;
-      let refunds = 0;
-      let tax = 0;
+      const discounts = 0;
+      const refunds = 0;
+      const tax = 0;
 
       for (const tx of dayTransactions) {
         const amount = Number(tx.total_amount || 0);
